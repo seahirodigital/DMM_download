@@ -632,6 +632,21 @@ async function createApp() {
   };
 }
 
+let appPromise = null;
+
+async function getApp() {
+  if (!appPromise) {
+    appPromise = createApp();
+  }
+
+  return appPromise;
+}
+
+async function handler(request, response) {
+  const app = await getApp();
+  return app.requestHandler(request, response);
+}
+
 async function main() {
   const app = await createApp();
   app.server.listen(app.config.app.port, app.config.app.host, () => {
@@ -646,6 +661,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = {
-  createApp
-};
+module.exports = handler;
+module.exports.createApp = createApp;
