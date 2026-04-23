@@ -197,6 +197,7 @@ function buildHistoryCsvRows(ranking) {
 
 async function createApp() {
   const config = await loadConfig();
+  const hosted = config.appMode === 'hosted';
   const stateStore = new StateStore(config);
   await stateStore.init();
 
@@ -206,6 +207,9 @@ async function createApp() {
 
   function buildSnapshot() {
     const warnings = [];
+    if (hosted) {
+      warnings.push('Hosted mode is enabled. Downloading, local library access, and cookie persistence are disabled on Vercel.');
+    }
     if (!config.dmm.cookieHeader) {
       warnings.push(
         'DMMのCookieが未設定です。ログインが必要な詳細ページは取得できません。'
@@ -235,11 +239,13 @@ async function createApp() {
       sourcePageUrl: body.sourcePageUrl || currentSettings.rankingSourceUrl
     });
     await stateStore.setRanking(ranking);
-    await appendCsvRows(
-      rankingHistoryCsv,
-      ['fetchedAt', 'rank', 'seasonId', 'title', 'actress', 'detailUrl', 'thumbnailUrl', 'searchUrl', 'sourcePageUrl'],
-      buildHistoryCsvRows(ranking)
-    );
+    if (!hosted) {
+      await appendCsvRows(
+        rankingHistoryCsv,
+        ['fetchedAt', 'rank', 'seasonId', 'title', 'actress', 'detailUrl', 'thumbnailUrl', 'searchUrl', 'sourcePageUrl'],
+        buildHistoryCsvRows(ranking)
+      );
+    }
 
     sendJson(response, 200, {
       ok: true,
@@ -267,6 +273,13 @@ async function createApp() {
   }
 
   async function handleSaveCookie(request, response) {
+    if (hosted) {
+      sendJson(response, 403, {
+        error: 'Hosted mode does not allow saving cookies.'
+      });
+      return;
+    }
+
     const body = await readRequestBody(request);
     const result = await saveCookieHeader(body.cookieHeader);
     sendJson(response, 200, {
@@ -276,6 +289,13 @@ async function createApp() {
   }
 
   async function handleImportN8nCookie(response) {
+    if (hosted) {
+      sendJson(response, 403, {
+        error: 'Hosted mode does not allow importing cookies.'
+      });
+      return;
+    }
+
     const workflowPath = path.join(process.cwd(), 'reference', 'DMM動画ダウンロードワークフロー.json');
     let workflow;
     try {
@@ -298,6 +318,13 @@ async function createApp() {
   }
 
   async function handleClearCookie(response) {
+    if (hosted) {
+      sendJson(response, 403, {
+        error: 'Hosted mode does not allow clearing cookies.'
+      });
+      return;
+    }
+
     const nextConfig = await saveConfigPatch({
       dmm: {
         cookieHeader: ''
@@ -310,6 +337,13 @@ async function createApp() {
   }
 
   async function handleSettings(request, response) {
+    if (hosted) {
+      sendJson(response, 403, {
+        error: 'Hosted mode does not allow changing local settings.'
+      });
+      return;
+    }
+
     const body = await readRequestBody(request);
     const nextSettings = {};
 
@@ -358,6 +392,14 @@ async function createApp() {
   }
 
   async function handleLibrary(url, response) {
+    if (hosted) {
+      sendJson(response, 403, {
+        error: 'Hosted mode does not provide local library access.',
+        items: []
+      });
+      return;
+    }
+
     const requestedDirectory = url.searchParams.get('dir');
     const libraryDirectory = requestedDirectory
       ? expandUserProfile(requestedDirectory)
@@ -379,6 +421,13 @@ async function createApp() {
   }
 
   async function handleDownloadStart(request, response) {
+    if (hosted) {
+      sendJson(response, 403, {
+        error: 'Downloading is disabled in hosted mode.'
+      });
+      return;
+    }
+
     const body = await readRequestBody(request);
     const ranking = stateStore.getRanking();
     if (!ranking?.items?.length) {
@@ -419,6 +468,13 @@ async function createApp() {
   }
 
   async function handleDownloadStop(response) {
+    if (hosted) {
+      sendJson(response, 403, {
+        error: 'Downloading is disabled in hosted mode.'
+      });
+      return;
+    }
+
     const result = await downloadManager.stop();
     sendJson(response, 200, {
       ok: true,
@@ -427,6 +483,13 @@ async function createApp() {
   }
 
   async function handleVideoStream(url, request, response) {
+    if (hosted) {
+      sendJson(response, 403, {
+        error: 'Hosted mode does not provide local video streaming.'
+      });
+      return;
+    }
+
     const filePath = url.searchParams.get('path');
     if (!filePath) {
       sendJson(response, 400, {
@@ -488,7 +551,7 @@ async function createApp() {
     fs.createReadStream(filePath, { start, end }).pipe(response);
   }
 
-  const server = http.createServer(async (request, response) => {
+  const requestHandler = async (request, response) => {
     try {
       const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
 
@@ -558,10 +621,13 @@ async function createApp() {
         error: error.message
       });
     }
-  });
+  };
+
+  const server = http.createServer(requestHandler);
 
   return {
     config,
+    requestHandler,
     server
   };
 }
@@ -573,7 +639,13 @@ async function main() {
   });
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  createApp
+};

@@ -12,3 +12,5 @@ data/history/
 *.err.log
 *.out.log
 start-error.log
+
+.vercel

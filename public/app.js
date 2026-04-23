@@ -54,6 +54,26 @@ function selectedRankingItems() {
   return currentRankingItems().filter((item) => state.selectedDownloadKeys.has(getDownloadKey(item)));
 }
 
+function appCapabilities() {
+  return state.snapshot?.config?.capabilities || {};
+}
+
+function isHostedMode() {
+  return state.snapshot?.config?.appMode === 'hosted';
+}
+
+function canDownload() {
+  return Boolean(appCapabilities().canDownload);
+}
+
+function canManageSettings() {
+  return Boolean(appCapabilities().canPersistSettings);
+}
+
+function canUseLibrary() {
+  return Boolean(appCapabilities().canUseLibrary);
+}
+
 function pruneDownloadSelection() {
   const validKeys = new Set(currentRankingItems().map(getDownloadKey).filter(Boolean));
   for (const key of [...state.selectedDownloadKeys]) {
@@ -276,6 +296,10 @@ async function requestJson(url, options = {}) {
 }
 
 function switchTab(tabName) {
+  if (tabName === 'viewer' && !canUseLibrary()) {
+    tabName = 'dashboard';
+  }
+
   state.tab = tabName;
   setMobileMenuOpen(false);
   document.querySelectorAll('.nav-button').forEach((button) => {
@@ -328,6 +352,7 @@ function renderHeaderActions() {
   }
 
   const isRunning = Boolean(state.snapshot.downloads?.running);
+  const downloadEnabled = canDownload();
   const { config, settings } = state.snapshot;
   const rankingFetchCount = settings.rankingFetchCount || config.ranking.first || 15;
 
@@ -359,15 +384,21 @@ function renderHeaderActions() {
     </button>
   `;
 
+  if (!downloadEnabled) {
+    qs('download-limit-input')?.closest('.header-control')?.setAttribute('hidden', 'hidden');
+    qs('header-select-download-button')?.remove();
+    qs('header-download-button')?.remove();
+  }
+
   const markDirty = () => {
     state.controlsDirty = true;
   };
 
   qs('ranking-fetch-count-input').addEventListener('input', markDirty);
-  qs('download-limit-input').addEventListener('input', markDirty);
+  qs('download-limit-input')?.addEventListener('input', markDirty);
   qs('header-fetch-ranking-button').addEventListener('click', fetchRanking);
-  qs('header-select-download-button').addEventListener('click', toggleDownloadSelectionMode);
-  qs('header-download-button').addEventListener('click', () => {
+  qs('header-select-download-button')?.addEventListener('click', toggleDownloadSelectionMode);
+  qs('header-download-button')?.addEventListener('click', () => {
     if (isRunning) {
       stopDownload();
       return;
@@ -384,6 +415,15 @@ function renderDashboardControls() {
 
 function renderSettingsPanel() {
   if (!state.snapshot || state.controlsDirty) {
+    return;
+  }
+
+  if (!canManageSettings()) {
+    elements.settingsPanelContent.innerHTML = `
+      <div class="empty-state">
+        Hosted mode では設定変更と Cookie 保存を無効化しています。PC の ` + '`start.bat`' + ` から起動したときだけダウンロード機能を使えます。
+      </div>
+    `;
     return;
   }
 
@@ -897,6 +937,17 @@ function playViewerIndex(index) {
 }
 
 async function refreshLibrary(options = {}) {
+  if (!canUseLibrary()) {
+    state.library = {
+      directory: '',
+      error: 'Hosted mode does not provide local library access.',
+      items: []
+    };
+    renderViewerList();
+    renderViewerMeta();
+    return;
+  }
+
   if (state.viewerMode === 'local') {
     renderViewerList();
     renderViewerMeta();
@@ -942,6 +993,11 @@ async function refreshState() {
   renderDashboardRanking();
   renderFavorites();
 
+  if (isHostedMode()) {
+    document.querySelector('[data-tab="viewer"]')?.setAttribute('hidden', 'hidden');
+    elements.settingsToggleButton?.setAttribute('hidden', 'hidden');
+  }
+
   if (!elements.viewerDirectoryInput.value) {
     elements.viewerDirectoryInput.value = state.snapshot.settings.libraryDirectory;
   }
@@ -949,6 +1005,11 @@ async function refreshState() {
 }
 
 async function saveSettings(options = {}) {
+  if (!canManageSettings()) {
+    showMessage('Hosted mode では設定変更を保存できません。', 'error');
+    return;
+  }
+
   try {
     const parsedLimit = Number(qs('download-limit-input')?.value);
     const parsedRankingFetchCount = Number(qs('ranking-fetch-count-input')?.value);
@@ -983,6 +1044,11 @@ async function saveSettings(options = {}) {
 }
 
 async function saveCookie() {
+  if (!appCapabilities().canManageCookies) {
+    showMessage('Hosted mode では Cookie を保存できません。', 'error');
+    return;
+  }
+
   try {
     const cookieHeader = qs('dmm-cookie-input').value;
     await requestJson('/api/session/cookie', {
@@ -999,6 +1065,11 @@ async function saveCookie() {
 }
 
 async function importN8nCookie() {
+  if (!appCapabilities().canManageCookies) {
+    showMessage('Hosted mode では Cookie を取り込めません。', 'error');
+    return;
+  }
+
   try {
     const result = await requestJson('/api/session/import-n8n-cookie', {
       body: JSON.stringify({}),
@@ -1013,6 +1084,11 @@ async function importN8nCookie() {
 }
 
 async function clearCookie() {
+  if (!appCapabilities().canManageCookies) {
+    showMessage('Hosted mode では Cookie を削除できません。', 'error');
+    return;
+  }
+
   try {
     await requestJson('/api/session/clear-cookie', {
       body: JSON.stringify({}),
@@ -1052,6 +1128,11 @@ async function fetchRanking() {
 }
 
 async function startDownload() {
+  if (!canDownload()) {
+    showMessage('Hosted mode ではダウンロード機能を無効化しています。', 'error');
+    return;
+  }
+
   try {
     if (!state.snapshot?.config?.capabilities?.hasCookie) {
       showMessage('DMMのCookieが未設定です。先にCookieを保存するか、n8nから取り込んでください。', 'error');
@@ -1088,6 +1169,11 @@ async function startDownload() {
 }
 
 async function stopDownload() {
+  if (!canDownload()) {
+    showMessage('Hosted mode ではダウンロード機能を無効化しています。', 'error');
+    return;
+  }
+
   try {
     await requestJson('/api/download/stop', {
       body: JSON.stringify({}),
