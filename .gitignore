@@ -1,0 +1,14 @@
+node_modules/
+
+# Local config with credentials/cookies
+config/app-config.json
+
+# Runtime data
+data/runtime/
+data/history/
+
+# Logs
+*.log
+*.err.log
+*.out.log
+start-error.log

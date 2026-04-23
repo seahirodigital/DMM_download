@@ -1,0 +1,35 @@
+{
+  "app": {
+    "host": "127.0.0.1",
+    "port": 4312
+  },
+  "paths": {
+    "downloadDir": "%USERPROFILE%\\Downloads\\DMM"
+  },
+  "ranking": {
+    "endpoint": "https://api.tv.dmm.com/graphql",
+    "sourcePageUrl": "https://tv.dmm.com/vod/restrict/list/?genres=66313",
+    "categories": [
+      "23"
+    ],
+    "sort": "RANK",
+    "first": 15,
+    "device": "BROWSER",
+    "origin": "https://tv.dmm.com",
+    "referer": "https://tv.dmm.com/",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
+  },
+  "dmm": {
+    "cookieHeader": ""
+  },
+  "affiliate": {
+    "searchAffiliateId": "cycreator-003"
+  },
+  "downloads": {
+    "defaultLimit": 5,
+    "concurrency": 1,
+    "filenameTemplate": "{{title}}_{{actress}}_{{seasonId}}",
+    "ffmpegCommand": "ffmpeg",
+    "requestTimeoutMs": 120000
+  }
+}

@@ -1,0 +1,579 @@
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const http = require('node:http');
+const path = require('node:path');
+
+const { getPublicConfig, loadConfig, saveConfigPatch } = require('./lib/config');
+const { DownloadManager } = require('./lib/download-manager');
+const { fetchRanking } = require('./lib/ranking-service');
+const { StateStore } = require('./lib/state-store');
+const {
+  appendCsvRows,
+  expandUserProfile,
+  isPathInside,
+  sortByModifiedDesc
+} = require('./lib/utils');
+
+const STATIC_EXTENSIONS = new Map([
+  ['.css', 'text/css; charset=utf-8'],
+  ['.html', 'text/html; charset=utf-8'],
+  ['.js', 'text/javascript; charset=utf-8'],
+  ['.json', 'application/json; charset=utf-8']
+]);
+
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.m4v', '.mov', '.webm', '.mkv', '.ts']);
+const VIDEO_CONTENT_TYPES = new Map([
+  ['.m4v', 'video/mp4'],
+  ['.mkv', 'video/x-matroska'],
+  ['.mov', 'video/quicktime'],
+  ['.mp4', 'video/mp4'],
+  ['.ts', 'video/mp2t'],
+  ['.webm', 'video/webm']
+]);
+
+function applyRuntimeConfig(target, source) {
+  for (const key of Object.keys(target)) {
+    delete target[key];
+  }
+  Object.assign(target, source);
+}
+
+function normalizeCookieHeader(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const withoutPrefix = raw.toLowerCase().startsWith('cookie:')
+    ? raw.slice(raw.indexOf(':') + 1).trim()
+    : raw;
+
+  return withoutPrefix
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('; ')
+    .replace(/\s*;\s*/g, '; ');
+}
+
+function findCookieInWorkflow(workflow) {
+  const workflows = Array.isArray(workflow) ? workflow : [workflow];
+  const candidates = [];
+
+  for (const entry of workflows) {
+    for (const node of entry?.nodes || []) {
+      const jsonHeaders = node?.parameters?.jsonHeaders;
+      if (!jsonHeaders) {
+        continue;
+      }
+
+      try {
+        const headers = JSON.parse(jsonHeaders);
+        if (headers.Cookie) {
+          candidates.push({
+            cookieHeader: normalizeCookieHeader(headers.Cookie),
+            nodeName: node.name || '名称未設定のHTTP Request'
+          });
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  const rankingCandidate = candidates.find((candidate) => candidate.nodeName.includes('ランキング'));
+  return rankingCandidate || candidates[0] || null;
+}
+
+function sendJson(response, statusCode, payload) {
+  response.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store'
+  });
+  response.end(JSON.stringify(payload));
+}
+
+function sendText(response, statusCode, message) {
+  response.writeHead(statusCode, {
+    'Content-Type': 'text/plain; charset=utf-8'
+  });
+  response.end(message);
+}
+
+async function readRequestBody(request) {
+  const chunks = [];
+  for await (const chunk of request) {
+    chunks.push(chunk);
+  }
+
+  const raw = Buffer.concat(chunks).toString('utf8');
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error('リクエスト本文はJSON形式で送信してください。');
+  }
+}
+
+async function serveStaticFile(response, publicDir, pathname) {
+  const safePath = pathname === '/' ? '/index.html' : pathname;
+  const resolved = path.resolve(publicDir, `.${safePath}`);
+  if (!isPathInside(publicDir, resolved)) {
+    sendText(response, 403, 'アクセスできないパスです。');
+    return;
+  }
+
+  const extension = path.extname(resolved).toLowerCase();
+  const contentType = STATIC_EXTENSIONS.get(extension);
+  if (!contentType) {
+    sendText(response, 404, '見つかりません。');
+    return;
+  }
+
+  try {
+    const contents = await fsp.readFile(resolved);
+    response.writeHead(200, {
+      'Content-Type': contentType
+    });
+    response.end(contents);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      sendText(response, 404, '見つかりません。');
+      return;
+    }
+    throw error;
+  }
+}
+
+async function listVideoFiles(directoryPath) {
+  const results = [];
+
+  async function walk(currentPath) {
+    const entries = await fsp.readdir(currentPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+        continue;
+      }
+
+      if (!VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+        continue;
+      }
+
+      const stats = await fsp.stat(fullPath);
+      results.push({
+        name: entry.name,
+        path: fullPath,
+        relativePath: path.relative(directoryPath, fullPath),
+        size: stats.size,
+        modifiedAt: stats.mtime.toISOString(),
+        modifiedAtTs: stats.mtimeMs
+      });
+    }
+  }
+
+  await walk(directoryPath);
+  return sortByModifiedDesc(results);
+}
+
+function buildHistoryCsvRows(ranking) {
+  return ranking.items.map((item) => ({
+    actress: item.actress,
+    detailUrl: item.playbackUrl || item.detailUrl,
+    fetchedAt: item.fetchedAt,
+    rank: item.rank,
+    searchUrl: item.searchUrl,
+    seasonId: item.seasonId,
+    sourcePageUrl: item.sourcePageUrl || ranking.sourcePageUrl || '',
+    thumbnailUrl: item.thumbnailUrl,
+    title: item.title
+  }));
+}
+
+async function createApp() {
+  const config = await loadConfig();
+  const stateStore = new StateStore(config);
+  await stateStore.init();
+
+  const downloadManager = new DownloadManager(config, stateStore);
+  const publicDir = path.join(process.cwd(), 'public');
+  const rankingHistoryCsv = path.join(process.cwd(), 'data', 'history', 'ranking-history.csv');
+
+  function buildSnapshot() {
+    const warnings = [];
+    if (!config.dmm.cookieHeader) {
+      warnings.push(
+        'DMMのCookieが未設定です。ログインが必要な詳細ページは取得できません。'
+      );
+    }
+
+    return {
+      config: getPublicConfig(config),
+      downloads: downloadManager.getStatus(),
+      historySummary: stateStore.buildSummary(),
+      ranking: stateStore.getRanking(),
+      settings: stateStore.getSettings(),
+      warnings
+    };
+  }
+
+  async function handleState(response) {
+    sendJson(response, 200, buildSnapshot());
+  }
+
+  async function handleFetchRanking(request, response) {
+    const body = await readRequestBody(request);
+    const requestedFirst = Number(body.first);
+    const currentSettings = stateStore.getSettings();
+    const ranking = await fetchRanking(config, {
+      first: Number.isFinite(requestedFirst) ? Math.max(1, requestedFirst) : config.ranking.first,
+      sourcePageUrl: body.sourcePageUrl || currentSettings.rankingSourceUrl
+    });
+    await stateStore.setRanking(ranking);
+    await appendCsvRows(
+      rankingHistoryCsv,
+      ['fetchedAt', 'rank', 'seasonId', 'title', 'actress', 'detailUrl', 'thumbnailUrl', 'searchUrl', 'sourcePageUrl'],
+      buildHistoryCsvRows(ranking)
+    );
+
+    sendJson(response, 200, {
+      ok: true,
+      ranking
+    });
+  }
+
+  async function saveCookieHeader(cookieHeader) {
+    const normalizedCookie = normalizeCookieHeader(cookieHeader);
+    if (!normalizedCookie) {
+      throw new Error('Cookieが空です。DMMにログインしたブラウザのRequest HeadersからCookieの値を貼り付けてください。');
+    }
+
+    const nextConfig = await saveConfigPatch({
+      dmm: {
+        cookieHeader: normalizedCookie
+      }
+    });
+    applyRuntimeConfig(config, nextConfig);
+
+    return {
+      hasCookie: Boolean(config.dmm.cookieHeader),
+      length: config.dmm.cookieHeader.length
+    };
+  }
+
+  async function handleSaveCookie(request, response) {
+    const body = await readRequestBody(request);
+    const result = await saveCookieHeader(body.cookieHeader);
+    sendJson(response, 200, {
+      ok: true,
+      result
+    });
+  }
+
+  async function handleImportN8nCookie(response) {
+    const workflowPath = path.join(process.cwd(), 'reference', 'DMM動画ダウンロードワークフロー.json');
+    let workflow;
+    try {
+      workflow = JSON.parse(await fsp.readFile(workflowPath, 'utf8'));
+    } catch (error) {
+      throw new Error(`n8nワークフローを読み込めませんでした: ${error.message}`);
+    }
+
+    const candidate = findCookieInWorkflow(workflow);
+    if (!candidate?.cookieHeader) {
+      throw new Error('n8nワークフロー内のHTTP RequestからCookieヘッダーを見つけられませんでした。');
+    }
+
+    const result = await saveCookieHeader(candidate.cookieHeader);
+    sendJson(response, 200, {
+      ok: true,
+      importedFrom: candidate.nodeName,
+      result
+    });
+  }
+
+  async function handleClearCookie(response) {
+    const nextConfig = await saveConfigPatch({
+      dmm: {
+        cookieHeader: ''
+      }
+    });
+    applyRuntimeConfig(config, nextConfig);
+    sendJson(response, 200, {
+      ok: true
+    });
+  }
+
+  async function handleSettings(request, response) {
+    const body = await readRequestBody(request);
+    const nextSettings = {};
+
+    if (body.downloadLimit !== undefined) {
+      const parsedLimit = Number(body.downloadLimit);
+      nextSettings.downloadLimit = Number.isFinite(parsedLimit)
+        ? Math.max(1, parsedLimit)
+        : config.downloads.defaultLimit;
+    }
+    if (body.rankingFetchCount !== undefined) {
+      const parsedCount = Number(body.rankingFetchCount);
+      nextSettings.rankingFetchCount = Number.isFinite(parsedCount)
+        ? Math.max(1, Math.min(100, parsedCount))
+        : config.ranking.first;
+    }
+    if (body.filenameTemplate !== undefined) {
+      nextSettings.filenameTemplate = String(body.filenameTemplate || config.downloads.filenameTemplate).trim();
+    }
+    if (body.libraryDirectory !== undefined) {
+      nextSettings.libraryDirectory = expandUserProfile(String(body.libraryDirectory || config.paths.downloadDir).trim());
+    }
+    if (body.rankingSourceUrl !== undefined) {
+      const rankingSourceUrl = String(body.rankingSourceUrl || config.ranking.sourcePageUrl).trim();
+      try {
+        nextSettings.rankingSourceUrl = new URL(rankingSourceUrl).toString();
+      } catch {
+        throw new Error('ランキング取得元URLが正しいURL形式ではありません。');
+      }
+    }
+    if (body.autoplayNext !== undefined) {
+      nextSettings.autoplayNext = Boolean(body.autoplayNext);
+    }
+
+    const settings = await stateStore.saveSettings(nextSettings);
+    sendJson(response, 200, {
+      ok: true,
+      settings
+    });
+  }
+
+  async function handleHistory(url, response) {
+    const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit') || 250)));
+    sendJson(response, 200, {
+      items: stateStore.listHistory(limit)
+    });
+  }
+
+  async function handleLibrary(url, response) {
+    const requestedDirectory = url.searchParams.get('dir');
+    const libraryDirectory = requestedDirectory
+      ? expandUserProfile(requestedDirectory)
+      : stateStore.getSettings().libraryDirectory;
+
+    try {
+      const items = await listVideoFiles(libraryDirectory);
+      sendJson(response, 200, {
+        directory: libraryDirectory,
+        items
+      });
+    } catch (error) {
+      sendJson(response, 200, {
+        directory: libraryDirectory,
+        error: error.message,
+        items: []
+      });
+    }
+  }
+
+  async function handleDownloadStart(request, response) {
+    const body = await readRequestBody(request);
+    const ranking = stateStore.getRanking();
+    if (!ranking?.items?.length) {
+      sendJson(response, 400, {
+        error: 'ランキングが未取得です。先にランキング取得を実行してください。'
+      });
+      return;
+    }
+
+    const settings = stateStore.getSettings();
+    const requestedSeasonIds = Array.isArray(body.seasonIds)
+      ? body.seasonIds.map((seasonId) => String(seasonId || '')).filter(Boolean)
+      : [];
+    const selectedItems = requestedSeasonIds.length
+      ? requestedSeasonIds
+          .map((seasonId) => ranking.items.find((item) => String(item.seasonId) === seasonId))
+          .filter(Boolean)
+      : ranking.items;
+
+    if (requestedSeasonIds.length && selectedItems.length !== requestedSeasonIds.length) {
+      sendJson(response, 400, {
+        error: '選択された動画が現在のランキング内に見つかりません。'
+      });
+      return;
+    }
+
+    const parsedCount = Number(body.count);
+    const sourceItems = requestedSeasonIds.length ? selectedItems : ranking.items;
+    const limit = Math.max(
+      1,
+      Math.min(sourceItems.length, Number.isFinite(parsedCount) ? parsedCount : settings.downloadLimit)
+    );
+    const result = await downloadManager.start(sourceItems, limit, settings);
+    sendJson(response, 200, {
+      ok: true,
+      result
+    });
+  }
+
+  async function handleDownloadStop(response) {
+    const result = await downloadManager.stop();
+    sendJson(response, 200, {
+      ok: true,
+      result
+    });
+  }
+
+  async function handleVideoStream(url, request, response) {
+    const filePath = url.searchParams.get('path');
+    if (!filePath) {
+      sendJson(response, 400, {
+        error: '動画ファイルのパスが指定されていません。'
+      });
+      return;
+    }
+
+    const allowedRoots = [config.paths.downloadDir, stateStore.getSettings().libraryDirectory].filter(Boolean);
+
+    if (!allowedRoots.some((root) => isPathInside(root, filePath))) {
+      sendJson(response, 403, {
+        error: '指定されたファイルは許可されたライブラリフォルダの外にあります。'
+      });
+      return;
+    }
+
+    let stats;
+    try {
+      stats = await fsp.stat(filePath);
+    } catch {
+      sendJson(response, 404, {
+        error: '動画ファイルが見つかりません。'
+      });
+      return;
+    }
+
+    const extension = path.extname(filePath).toLowerCase();
+    const contentType = VIDEO_CONTENT_TYPES.get(extension) || 'application/octet-stream';
+
+    const range = request.headers.range;
+    if (!range) {
+      response.writeHead(200, {
+        'Accept-Ranges': 'bytes',
+        'Content-Length': stats.size,
+        'Content-Type': contentType
+      });
+      fs.createReadStream(filePath).pipe(response);
+      return;
+    }
+
+    const match = /^bytes=(\d+)-(\d*)$/.exec(range);
+    if (!match) {
+      response.writeHead(416);
+      response.end();
+      return;
+    }
+
+    const start = Number(match[1]);
+    const end = match[2] ? Number(match[2]) : stats.size - 1;
+
+    response.writeHead(206, {
+      'Accept-Ranges': 'bytes',
+      'Content-Length': end - start + 1,
+      'Content-Range': `bytes ${start}-${end}/${stats.size}`,
+      'Content-Type': contentType
+    });
+
+    fs.createReadStream(filePath, { start, end }).pipe(response);
+  }
+
+  const server = http.createServer(async (request, response) => {
+    try {
+      const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
+
+      if (request.method === 'GET' && url.pathname === '/api/state') {
+        await handleState(response);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/ranking/fetch') {
+        await handleFetchRanking(request, response);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/settings') {
+        await handleSettings(request, response);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/session/cookie') {
+        await handleSaveCookie(request, response);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/session/import-n8n-cookie') {
+        await handleImportN8nCookie(response);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/session/clear-cookie') {
+        await handleClearCookie(response);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/history') {
+        await handleHistory(url, response);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/library') {
+        await handleLibrary(url, response);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/download/start') {
+        await handleDownloadStart(request, response);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/download/stop') {
+        await handleDownloadStop(response);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/video') {
+        await handleVideoStream(url, request, response);
+        return;
+      }
+
+      if (request.method === 'GET') {
+        await serveStaticFile(response, publicDir, url.pathname);
+        return;
+      }
+
+      sendText(response, 405, '許可されていないHTTPメソッドです。');
+    } catch (error) {
+      sendJson(response, 500, {
+        error: error.message
+      });
+    }
+  });
+
+  return {
+    config,
+    server
+  };
+}
+
+async function main() {
+  const app = await createApp();
+  app.server.listen(app.config.app.port, app.config.app.host, () => {
+    console.log(`動画視聴: http://${app.config.app.host}:${app.config.app.port}`);
+  });
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

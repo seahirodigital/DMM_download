@@ -1,0 +1,1115 @@
+[
+  {
+    "updatedAt": "2025-12-09T11:36:12.000Z",
+    "createdAt": "2025-09-23T14:25:39.522Z",
+    "id": "K8R57QdpX4WqD5vB",
+    "name": "DMM動画ダウンロードワークフロー",
+    "active": false,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          -64,
+          -16
+        ],
+        "id": "6d6fb065-00a2-4bbd-b2e7-4b0bea740eee",
+        "name": "When clicking ‘Execute workflow’"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          640,
+          -16
+        ],
+        "id": "456ab434-292d-4fb6-b3df-67f24159c773",
+        "name": "Loop Over Items"
+      },
+      {
+        "parameters": {
+          "content": "## DMMTVランキング取得 \n・Body firstの数値で取得数の可変",
+          "height": 512
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          80,
+          -192
+        ],
+        "id": "31cc0009-91b1-49e3-8ab3-e21d2bc51f34",
+        "name": "Sticky Note"
+      },
+      {
+        "parameters": {
+          "content": "## スプシヘッダー変換\n・女優名\n・検索URL\n・アフィURL\nなどへ整形\n",
+          "height": 512,
+          "width": 208
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          352,
+          -192
+        ],
+        "id": "12079ebe-5730-4d9c-b1c4-7d8b403facb9",
+        "name": "Sticky Note1"
+      },
+      {
+        "parameters": {
+          "content": "## １つずつ処理",
+          "height": 512
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          576,
+          -192
+        ],
+        "id": "d0ff4ceb-1a47-4ea6-ac19-b98eeeca0e48",
+        "name": "Sticky Note2"
+      },
+      {
+        "parameters": {
+          "content": "## 女優別商品取得\n・DMM/FANZA 商品情報APIから商品情報入手\n※要公式API登録",
+          "height": 512
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          880,
+          -176
+        ],
+        "id": "37b5fcc8-1fd5-4fdc-b3c4-5fc8377d51df",
+        "name": "Sticky Note3"
+      },
+      {
+        "parameters": {
+          "content": "## 限定商品の除外\n・数量限定商品はURLが切れる事があるため除外",
+          "height": 512,
+          "width": 224
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1152,
+          -176
+        ],
+        "id": "a8f0fda8-4765-4c97-aaa6-6141762a73dd",
+        "name": "Sticky Note4"
+      },
+      {
+        "parameters": {
+          "jsCode": "// n8nの入力データを取得（HTTP Requestノードの結果）\nconst items = $input.all();\n\n// 日付の取得とフォーマット\nconst now = new Date();\nconst year = now.getFullYear();\nconst month = String(now.getMonth() + 1).padStart(2, '0');\nconst day = String(now.getDate()).padStart(2, '0');\nconst formattedDate = `${year}/${month}/${day}`;\n\n// DMMアフィリエイト検索URLのベース\nconst affiliateSearchUrlBase = 'https://affiliate.dmm.com/search_link?site=dmm&affiliateId=cycreator-003&service=mono&floor=dvd&sort=date&keyword=';\n\n// APIのレスポンス（JSON）から動画リスト部分を抽出\n// あなたのデータ構造に合わせて 'data.searchVideos.edges' の部分を調整する可能性があります\nconst videoEdges = items[0].json.data.searchVideos.edges;\n\n// 最終的に出力する整形済みデータの配列\nconst formattedData = [];\n\n// 各動画データをループ処理して情報を抽出\nfor (const [index, edge] of videoEdges.entries()) {\n  const node = edge.node;\n  \n  // 順位（1から始まるように +1 する）\n  const rank = index + 1;\n\n  // タイトルと女優名の分割（元のJSロジックを再現）\n  let title = node.titleName || '（タイトル不明）';\n  let actress = '（女優名不明）';\n  if (title !== '（タイトル不明）') {\n    const parts = title.split(/\\s+/);\n    if (parts.length > 1) {\n      actress = parts.pop();\n      title = parts.join(' ');\n    }\n  }\n\n  // サムネイルURLからスプレッドシート用関数を生成\n  const thumbnailUrl = node.packageImage || '';\n  const imageFormula = thumbnailUrl ? `=IMAGE(\"${thumbnailUrl}\", 2)` : '';\n\n  // 動画URLをIDから組み立てる (※APIレスポンスにURLがないため、一般的な形式から推測)\n  const fullUrl = `https://tv.dmm.com/vod/detail/?season=${node.id}`;\n\n  // 女優名からアフィリエイト検索URLを生成\n  let affiliateSearchUrl = '';\n  if (actress !== '（女優名不明）') {\n    const encodedActress = encodeURIComponent(actress);\n    affiliateSearchUrl = `${affiliateSearchUrlBase}${encodedActress}`;\n  }\n\n  // TSVの1行に相当するオブジェクトを作成\n  const rowData = {\n    '取得日': formattedDate,\n    '検索カテゴリ': '23', // APIリクエストで指定したID。カテゴリ名はAPIレスポンスにないためIDを仮置き。\n    'ジャンル': '', // ジャンル情報は現在のAPIレスポンスに含まれていないため空欄。\n    'ソート順': 'RANK', // APIリクエストで指定したソート順\n    '順位': rank,\n    'サムネイル': imageFormula,\n    'タイトル': title,\n    '女優名': actress,\n    'URL': fullUrl,\n    '検索URL': affiliateSearchUrl\n  };\n  \n  formattedData.push(rowData);\n}\n\n// n8nの次のノードへ、整形したデータを返す\nreturn formattedData;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          400,
+          -16
+        ],
+        "id": "eb5867ff-5149-4d1c-9c6e-b7cfc7dd9b5c",
+        "name": "スプシ用整形"
+      },
+      {
+        "parameters": {
+          "mode": "combine",
+          "combineBy": "combineByPosition",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          1040,
+          192
+        ],
+        "id": "09b990b4-b508-48d8-852d-1f79289cdb9f",
+        "name": "Merge"
+      },
+      {
+        "parameters": {
+          "operation": "appendOrUpdate",
+          "documentId": {
+            "__rl": true,
+            "value": "1q4p-LHH3i5SR-Kod2qX669dYciR4KBhz-6ob-1ub6us",
+            "mode": "list",
+            "cachedResultName": "DMM_画像分析",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1q4p-LHH3i5SR-Kod2qX669dYciR4KBhz-6ob-1ub6us/edit?usp=drivesdk"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": 1979200894,
+            "mode": "list",
+            "cachedResultName": "n8n_取得リスト",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1q4p-LHH3i5SR-Kod2qX669dYciR4KBhz-6ob-1ub6us/edit#gid=1979200894"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "女優名": "={{ $json['女優名'] }}",
+              "タイトル": "={{ $json['タイトル'] }}",
+              "取得日": "={{ $json['取得日'] }}",
+              "順位": "={{ $json['順位'] }}",
+              "検索カテゴリ": "={{ $json['検索カテゴリ'] }}",
+              "ソート順": "={{ $json['ソート順'] }}",
+              "サムネイル": "={{ $json['サムネイル'] }}",
+              "検索URL": "={{ $json.URL }}",
+              "タイトル+女優名検索URL": "={{ $json.URL }}",
+              "アフィリエイトURL": "={{ $json['アフィリエイトURL'] }}"
+            },
+            "matchingColumns": [
+              "タイトル"
+            ],
+            "schema": [
+              {
+                "id": "順位",
+                "displayName": "順位",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "取得日",
+                "displayName": "取得日",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "検索カテゴリ",
+                "displayName": "検索カテゴリ",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "ソート順",
+                "displayName": "ソート順",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "サムネイル",
+                "displayName": "サムネイル",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "タイトル",
+                "displayName": "タイトル",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "女優名",
+                "displayName": "女優名",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "URL",
+                "displayName": "URL",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": true
+              },
+              {
+                "id": "検索URL",
+                "displayName": "検索URL",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "タイトル+女優名検索URL",
+                "displayName": "タイトル+女優名検索URL",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "アフィリエイトURL",
+                "displayName": "アフィリエイトURL",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          1440,
+          -16
+        ],
+        "id": "e363e305-ef75-49e4-a58a-d7bdac41fed6",
+        "name": "スプシ書き込み",
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "3EJKxUoo3vyq8YnS",
+            "name": "Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## スプシ保存\n\n・個別DVDページ（ダウンロードページ）\n・アフィURL\n・商品検索・個別URL",
+          "height": 512,
+          "width": 224
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1392,
+          -176
+        ],
+        "id": "52792c3f-556a-4b04-a75d-c5d2d3621957",
+        "name": "Sticky Note5"
+      },
+      {
+        "parameters": {
+          "amount": 1
+        },
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          800,
+          -16
+        ],
+        "id": "ac0daa21-39aa-41b2-915f-e6dadd7c6e3d",
+        "name": "Wait",
+        "webhookId": "50af1f68-bbfa-4aeb-a0ab-88b09388e4fa"
+      },
+      {
+        "parameters": {
+          "content": "## Twitter投稿内容にJS整形\nーー投稿テンプレーー\nタイトル\n#女優名\n\nアフィリエイトURL\n",
+          "height": 512,
+          "width": 208
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1648,
+          -176
+        ],
+        "id": "46e0665d-16fd-4dc9-8271-5f1b9783dab0",
+        "name": "Sticky Note6"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "3c60d7a3-5421-45fc-8221-497cb29b3452",
+                "name": "投稿",
+                "value": "={{ $json['タイトル'] }}\n#{{ $json['女優名'] }}\n\n{{ $json['アフィリエイトURL'] }}",
+                "type": "string"
+              },
+              {
+                "id": "95e64c66-638a-4c10-8c06-9d5242f3295f",
+                "name": "カテゴリ",
+                "value": "ライト層向け",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          1696,
+          32
+        ],
+        "id": "d8b39066-486b-4867-a2d0-cf358128cec3",
+        "name": "X投稿用整形"
+      },
+      {
+        "parameters": {
+          "content": "## X自動投稿用の\nNotionDBへ書込み\n\n",
+          "height": 512,
+          "width": 160
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1872,
+          -176
+        ],
+        "id": "fa931f81-3635-4b81-a826-ebf02ce525c1",
+        "name": "Sticky Note7"
+      },
+      {
+        "parameters": {
+          "resource": "databasePage",
+          "databaseId": {
+            "__rl": true,
+            "value": "27bc4a3b-7cc2-805c-bbaa-f461b7ae0801",
+            "mode": "list",
+            "cachedResultName": "Xポスト管理",
+            "cachedResultUrl": "https://www.notion.so/27bc4a3b7cc2805cbbaaf461b7ae0801"
+          },
+          "propertiesUi": {
+            "propertyValues": [
+              {
+                "key": "ポスト内容|rich_text",
+                "textContent": "={{ $json['投稿'] }}"
+              },
+              {
+                "key": "カテゴリ|select",
+                "selectValue": "ライト層向け"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.notion",
+        "typeVersion": 2.2,
+        "position": [
+          1904,
+          32
+        ],
+        "id": "43c46c17-7d50-452e-99c5-fe627dede37b",
+        "name": "Xポスト管理DBへ",
+        "credentials": {
+          "notionApi": {
+            "id": "WlSlGXYbJmzduE4O",
+            "name": "Notion account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.tv.dmm.com/graphql",
+          "sendHeaders": true,
+          "specifyHeaders": "json",
+          "jsonHeaders": "{\n  \"Content-Type\": \"application/json\",\n  \"Origin\": \"https://tv.dmm.com\",\n  \"Referer\": \"https://tv.dmm.com/\",\n  \"User-Agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36\",\n  \"Cookie\": \"adpf_uid=RCgugCuVoZYKUlGC; rieSh3Ee_ga=GA1.1.1754472039.1755755809; _gcl_au=1.1.675229679.1755755809; _yjsu_yjad=1755755809.3547fd6e-6a48-42a5-8d6c-f63009b02f85; FPID=FPID2.2.FYKHjmjL%2FW8pUp8f06afHgEJs4wPSJXBm%2Bom%2FelvXyQ%3D.1755755809; FPAU=1.1.675229679.1755755809; i3_ab=7e6e5283-c2ba-472f-841f-2e098c36dee5; deviceIdentify=QIY3sZeqHAVGwPK23r9xuEE35N4jIU; check_done_login=true; subscription_members_status=unsubscribe; alcb=true; cdp_id=x4hZrLOiu2Egw9ZI; uid=HblPoBZcppCdtrnQRnul; suid=HblPoBZcppCdtrnQRnul; _egl-uuid=f2bcd839-cfc3-4cc3-8677-3a7b682bfd42; _egl-tid=d2jb7oq9io6g02tvap1g; _im_vid=01K35MTKJK64H6RRMESK26VJQG; __lt__cid=594c82ef-1b02-4ec5-baf9-21bfdc4a4666; _fbp=fb.1.1755757498074.111034309488260369; _tt_enable_cookie=1; _ttp=01K35MTKRNK5ZBH80BA6FC04QF_.tt.1; _a1_f=6c59f715-b9d3-4d03-83c0-10ea7cf734ce; digital[play_volume]=0.5; digital[play_muted]=0; pt_3cslmtsm=deviceId%3D775edc9c-1c87-4cb8-ab58-b7a76e9b5737%26sessionId%3D115eb278-e6b2-44dd-a38b-584ed0c5578a%26accountId%3D%26vn%3D1%26pvn%3D1%26lastActionTime%3D1756274664756%26; ixd_lastclick=6828,1756287165; book_safe_mode_level=mild; _cq_duid=1.1756375831.boJClVGHnZ1g3g4U; ttcsid_CTV0H23C77U61JAAN11G=1756375832225::tsNnPWlrVGnxUh5hBW6x.1.1756375836517; age_check_done=1; top_pv_uid=0287c794-b94e-4671-bdec-29b2d8f27280; top_dummy=75d760ee-0c45-46f7-9240-0bdcee4b0fb3; _ga=GA1.1.610577509.1757385973; _ga_7TLF1P6654=GS2.1.s1757385972$o1$g0$t1757386051$j60$l0$h0; _egl-vph={\\\"ttdvWFrSTXasvUcHHwnLGR\\\":1758101370448,\\\"9PPspoDYu3fokkrGeeoPfU\\\":1758101370448,\\\"h34SKdoVA9izA846coN39M\\\":1758101370448}; __lt__cid.ee1832d2=594c82ef-1b02-4ec5-baf9-21bfdc4a4666; __utmc=225231877; INT_SESID=Ag4DXBkVDwReRjZ7IhoIFV9XVAMTVQdUVQtUA1EbAQsFUh1SVldRGl1VWlRLXFZfAFIEWgQCBQJWEA5AWQMNEDBgcTQ2RA5eXlVUB14MAl9cXFoCQlkNXhV7e2c8ZXJhKnASXQNcAg0fF1kBXBpmLyFGWUoLUAJeFQQEUABTVVFaGVVeAQMYA1cBVx9eWgtRSAYDWgJXDFdVUAQDVRQMQVkNCkQPA1hVARY8WwIaCBVfVVADEycFVAcFVwdTBANFVhYLFVhTDxUABjxbAhoIFV9VWBsHQQ8XDQUPERZFUkA8XVREWRUPBlJeQUpSUGkUKSsLTAMmUxMOaHwRWEUNC1kWURMWDmpDDQkGEF1RCVdSUVoNAFoNXA8JRglSBw0QB0FACgsFVEMNCw0QXUsJVl9GQAJCWQVcDRBcQDxXUVQKWFkHFgNqWBMKBkBEA1FcVF8fRA%3D%3D; INT_SESID_SECURE=Ag4DXBkVDwReRjZ7IhoIFV9XVAMTVQdUVQtUA1EbAQsFUh1SVldRGl1VWlRLXFZfAFIEWgQCBQJWEA5AWQMNEDBgcTQ2RA5eXlVUB14MAl9cXFoCQlkNXhV7e2c8ZXJhKnASXQNcAg0fF1kBXBpmLyFGWUoLUAJeFQQEUABTVVFaGVVeAQMYA1cBVx9eWgtRSAYDWgJXDFdVUAQDVRQMQVkNCkQPA1hVARY8WwIaCBVfVVADEycFVAcFVwdTBANFVhYLFVhTDxUABjxbAhoIFV9VWBsHQQ8XDQUPERZFUkA8XVREWRUPBlJeQUpSUGkUKSsLTAMmUxMOaHwRWEUNC1kWURMWDmpDDQkGEF1RCVdSUVoNAFoNXA8JRglSBw0QB0FACgsFVEMNCw0QXUsJVl9GQAJCWQVcDRBcQDxXUVQKWFkHFgNqWBMKBkBEA1FcVF8fRA%3D%3D; secid=5d2b56cc176ec499f8360d83f7d1f818; login_secure_id=5d2b56cc176ec499f8360d83f7d1f818; login_session_id=61ccebc9-e8ce-43e4-8b87-bac3483bb106; i3_opnd=x4hZrLOiu2Egw9ZI; ckcy_remedied_check=ktkrt_argt; dmm_service=BFsCAx1FWwQCR1JXXlsJWUNeVwwBAx9KWFYNREEKRURHWkMDUwxDUF0CWFYRDRtEW1MMFENcBUsBChVdU18DCh4SCgBcFBJXWRdSUEBCFBVaFgwDBgNGURchdFRHNgRXFy5KURR1NgJ0PQEJfHojBgM2cwRFXBxoDQdlU3wxAkZcMVsJX3lWBwE9Vk1iaTkVWhYMAwobCFAPC0NECQwNA1VaQwNSDENEUQBGGghFXABbR0ZXU1IFXgdADBUIUQ0SFg5CTUQNEggJVAsaQVcIXBEXWVBZVQEbWR9K; FPLC=%2Fww3ZXgLHtX%2BPBPtZuijrnghkh7pFDMz47XRvL0G6KMnmrLfcv7pGaC9cC0uu8E%2BNPbloudZKyoVNKiiDd6i1XTtEqWT3bwZS54NOBdm79BhOooh4x0QDpJ3yGL3Cg%3D%3D; _clck=w8xkcj%5E2%5Efzk%5E0%5E2059; mbox=check#true#1758637579|session#1758637518203-865414#1758639379; __utma=225231877.1940412976.1755755925.1758617125.1758637519.14; __utmz=225231877.1758637519.14.10.utmcsr=cycreator-002|utmccn=affiliate_search_link|utmcmd=dmm_affiliate|utmcct=link; __utmb=225231877.1.10.1758637519; ckcy=1; _uetsid=a6ed74e0985911f09598432e369f8e03; _uetvid=e64369e07e5311f09c495dd05c540efe; _clsk=152b9i2%5E1758637520747%5E1%5E0%5Ei.clarity.ms%2Fcollect; ab.storage.deviceId.77621d63-b475-4831-aa6a-fdc165b89763=%7B%22g%22%3A%22a26a3e3b-683f-092a-4598-071fa05b991b%22%2C%22c%22%3A1755757497790%2C%22l%22%3A1758637524203%7D; ab.storage.userId.77621d63-b475-4831-aa6a-fdc165b89763=%7B%22g%22%3A%22x4hZrLOiu2Egw9ZI%22%2C%22c%22%3A1755757519145%2C%22l%22%3A1758637524206%7D; __lt__sid=d5b6e092-c9503427; ab.storage.sessionId.77621d63-b475-4831-aa6a-fdc165b89763=%7B%22g%22%3A%226a320858-b928-5195-ae39-2cfa5b033098%22%2C%22e%22%3A1758639578562%2C%22c%22%3A1758637524201%2C%22l%22%3A1758637778562%7D; cto_bundle=OSYofF9CSGhnUSUyRkFFTWhyQmQxWk9YUDJsWVhTREt4ViUyQkc3Z3Y5WjhrVEo5d1hDSjhibXhZTnpYUHpMcExuT3hrMWtHbkhyd3ExbWN6RzZGWXVsbElsemolMkJzem1wYXNWTHpjcFlwRmk4OXJOdCUyQjZDMHVlSjBIZDVNMjUxNFdzMHJITFJGU1NjaEhrWThXbU5jUkI5S3loMU1KZXk1RGw1RmppT1F5YWVlandqa0NPTGUlMkJ3Q2h2UFNWbG1TQUZqZktRYXBLZUxiOFlFOU56b1IlMkZ6SHIyV1ZlNjZYaUlHTUNWeU9zbDduR21hT0VNTUZldGxGdEJzeTJzYjFDWVN2VjI4eEsxZHolMkZmdWJtaDhTJTJGdUtnSTFYNDJDaXdpVWVQdlM0R3lXWVVieVFsbFlGNmN2JTJCNnpORXElMkZtWTVOOVQ2Z1dja0Ri; ttcsid_CPQJ0UBC77U1G0V3HO1G=1758637525206::JmUg_QcBGQx5IQ-s3KzJ.13.1758637780382.0; ttcsid_CQCB603C77U7A8U7OJS0=1758637525208::Weux-psoTfE8FVg13Ydu.13.1758637780382.0; ttcsid_CD36583C77UFSQD45A5G=1758637525197::GdbnbDFVohW-fREUAvEL.14.1758637780382.0; ttcsid=1758637525200::-oE3tIbaWNm3FYEbyXmd.14.1758637780866.0; ttcsid_CVSBFSJC77U08QHV2NC0=1758637525211::7N2X8BJOa5FgPyewHrtk.14.1758637781172.0; FPGSID=1.1758637521.1758638776.G-KQYE0DE5JW.fXqgVMYcz6BGeZ-ECGrkuA; rieSh3Ee_ga_KQYE0DE5JW=GS2.1.s1758637518$o21$g1$t1758639302$j60$l0$h1009609269\"\n}",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "{\n  \"operationName\": \"FetchSearchVideos\",\n  \"variables\": {\n    \"sort\": \"RANK\",\n    \"categories\": [\n      \"23\"\n    ],\n    \"device\": \"BROWSER\",\n    \"first\": 15\n  },\n  \"query\": \"query FetchSearchVideos($device: Device!, $keyword: String, $title: ID, $categories: [ID!], $genres: [ID!], $casts: [ID!], $staffs: [ID!], $series: ID, $contentType: VideoContentTypeFilter, $viewingTypes: [VideoViewingType!], $campaigns: [ID!], $sort: VideoSearchSortKey, $first: Int, $last: Int, $before: String, $after: String) {\\n  searchVideos(\\n    device: $device\\n    keyword: $keyword\\n    title: $title\\n    categories: $categories\\n    genres: $genres\\n    casts: $casts\\n    staffs: $staffs\\n    series: $series\\n    contentType: $contentType\\n    viewingTypes: $viewingTypes\\n    campaigns: $campaigns\\n    sort: $sort\\n    first: $first\\n    last: $last\\n    before: $before\\n    after: $after\\n  ) {\\n    ...VideoSearchResultConnection\\n    __typename\\n  }\\n}\\n\\nfragment VideoSearchResultConnection on VideoSearchResultConnection {\\n  edges {\\n    node {\\n      ...BaseSearchResult\\n      __typename\\n    }\\n    __typename\\n  }\\n  pageInfo {\\n    startCursor\\n    endCursor\\n    hasNextPage\\n    hasPreviousPage\\n    __typename\\n  }\\n  total\\n  facet {\\n    titles {\\n      name\\n      value\\n      count\\n      __typename\\n    }\\n    categories {\\n      name\\n      value\\n      count\\n      __typename\\n    }\\n    genres {\\n      name\\n      value\\n      count\\n      __typename\\n    }\\n    casts {\\n      name\\n      value\\n      count\\n      __typename\\n    }\\n    staffs {\\n      name\\n      value\\n      count\\n      __typename\\n    }\\n    series {\\n      name\\n      value\\n      count\\n      __typename\\n    }\\n    campaigns {\\n      name\\n      value\\n      count\\n      __typename\\n    }\\n    contentTypes {\\n      name\\n      value\\n      count\\n      __typename\\n    }\\n    viewingTypes {\\n      name\\n      value\\n      count\\n      __typename\\n    }\\n    __typename\\n  }\\n  __typename\\n}\\n\\nfragment BaseSearchResult on VideoSearchResult {\\n  __typename\\n  id\\n  titleName\\n  seasonName\\n  packageImage\\n  packageLargeImage\\n  keyVisualImage\\n  keyVisualWithoutLogoImage\\n  description\\n  lowestPrice\\n  highestPrice\\n  seasonType\\n  discountedLowestPrice\\n  discountedHighestPrice\\n  isNewArrival\\n  isExclusive\\n  isOnCampaign\\n  customTag\\n  viewingTypes\\n  reviewAveragePoint\\n  rating\\n}\\n\"\n}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          144,
+          -16
+        ],
+        "id": "fb5eef21-0563-4396-bc32-b6a4e51d3975",
+        "name": "DMMランキング取得"
+      },
+      {
+        "parameters": {
+          "content": "## 個別女優作品取得：from Apps Sheet(スプシ連携済）\n・DMM/FANZA 商品情報APIから商品情報入手\n※要公式API登録",
+          "height": 416,
+          "width": 256
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          864,
+          384
+        ],
+        "id": "0cd68f70-d5ab-41e9-b7d9-c4b63f9fe2d0",
+        "name": "Sticky Note8"
+      },
+      {
+        "parameters": {
+          "content": "## 限定商品の除外\n・数量限定商品はURLが切れる事があるため除外",
+          "height": 416,
+          "width": 224
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1152,
+          384
+        ],
+        "id": "cffb0952-60df-4eb9-8266-5552376a8360",
+        "name": "Sticky Note9"
+      },
+      {
+        "parameters": {
+          "content": "## スプシ保存\n\n・個別DVDページ（ダウンロードページ）\n・アフィURL\n・商品検索・個別URL",
+          "height": 416,
+          "width": 224
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1392,
+          384
+        ],
+        "id": "04bff828-172a-46df-8c20-2753574c3ed3",
+        "name": "Sticky Note10"
+      },
+      {
+        "parameters": {
+          "content": "## Twitter投稿内容にJS整形\nーー投稿テンプレーー\nタイトル\n#女優名\n\nアフィリエイトURL\n",
+          "height": 416,
+          "width": 208
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1648,
+          384
+        ],
+        "id": "6843051b-f100-4766-8d2d-4b00cccd2484",
+        "name": "Sticky Note11"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "3c60d7a3-5421-45fc-8221-497cb29b3452",
+                "name": "投稿",
+                "value": "={{ $json['タイトル'] }}\n#{{ $json['女優名'] }}\n\n{{ $json['アフィリエイトURL'] }}",
+                "type": "string"
+              },
+              {
+                "id": "95e64c66-638a-4c10-8c06-9d5242f3295f",
+                "name": "カテゴリ",
+                "value": "ライト層向け",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          1696,
+          608
+        ],
+        "id": "c746240f-0ad2-48fd-8963-4917c2e1add3",
+        "name": "X投稿用整形1"
+      },
+      {
+        "parameters": {
+          "content": "## X自動投稿用の\nNotionDBへ書込み\n\n",
+          "height": 416,
+          "width": 192
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1872,
+          384
+        ],
+        "id": "74fd0cea-fefe-4fb9-bee1-ca0c0001db08",
+        "name": "Sticky Note12"
+      },
+      {
+        "parameters": {
+          "resource": "databasePage",
+          "databaseId": {
+            "__rl": true,
+            "value": "27bc4a3b-7cc2-805c-bbaa-f461b7ae0801",
+            "mode": "list",
+            "cachedResultName": "Xポスト管理",
+            "cachedResultUrl": "https://www.notion.so/27bc4a3b7cc2805cbbaaf461b7ae0801"
+          },
+          "propertiesUi": {
+            "propertyValues": [
+              {
+                "key": "ポスト内容|rich_text",
+                "textContent": "={{ $json['投稿'] }}"
+              },
+              {
+                "key": "カテゴリ|select",
+                "selectValue": "ライト層向け"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.notion",
+        "typeVersion": 2.2,
+        "position": [
+          1904,
+          608
+        ],
+        "id": "30094afc-775c-4ec5-b1a0-97e59754c8db",
+        "name": "Xポスト管理DBへ1",
+        "credentials": {
+          "notionApi": {
+            "id": "WlSlGXYbJmzduE4O",
+            "name": "Notion account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// n8n Code Node - 最終修正版\n// DMM Affiliate APIのレスポンスから「限定」商品を除外し、通常商品の情報を抽出します。\n// さらに、前のノードから渡された「順位」「取得日」などの情報も引き継ぎます。\n\n// 最終的な出力結果を格納する配列\nconst finalResults = [];\n\n// n8nの入力アイテム (items) をインデックス付きで一つずつ処理します\nfor (const [index, inputItem] of items.entries()) {\n  // 入力データにAPIレスポンスのitems配列が存在するか確認します\n  if (inputItem.json && inputItem.json.result && Array.isArray(inputItem.json.result.items)) {\n    const apiItems = inputItem.json.result.items;\n\n    // 商品リストの中から「限定」や「チェキ付き」というキーワードを含まない通常商品を探します\n    const normalItem = apiItems.find(item =>\n      !item.title.includes('【数量限定】') && !item.title.includes('チェキ付き') && !item.title.includes('BOD')&& !item.title.includes('ブルーレイディスク')\n    );\n\n    // 通常商品が見つかった場合にのみ、処理を実行します\n    if (normalItem) {\n      // 女優名を抽出します (存在しない場合も考慮します)\n      let actorName = '';\n      if (normalItem.iteminfo && Array.isArray(normalItem.iteminfo.actor) && normalItem.iteminfo.actor.length > 0) {\n        // 複数の女優がいる場合も考慮し、カンマ区切りで連結します\n        actorName = normalItem.iteminfo.actor.map(a => a.name).join(', ');\n      }\n\n      // ご要望の「女優名＋タイトル名」での検索URLを生成します\n      // タイトルから女優名（もし含まれていれば）を除外して、よりシンプルな検索キーワードにします\n      const cleanTitle = normalItem.title.replace(`/${actorName}`, '').trim();\n      const searchKeyword = actorName ? `${actorName} ${cleanTitle}` : cleanTitle;\n      const encodedKeyword = encodeURIComponent(searchKeyword);\n      const searchUrl = `https://affiliate.dmm.com/search_link?site=dmm&affiliateId=cycreator-003&service=mono&floor=dvd&sort=date&keyword=${encodedKeyword}`;\n\n      // Googleスプレッドシートで見やすいように、サムネイル画像をIMAGE関数形式に変換します\n      const thumbnailUrl = normalItem.imageURL?.large || normalItem.imageURL?.small || '';\n      const thumbnailFormula = thumbnailUrl ? `=IMAGE(\"${thumbnailUrl}\", 2)` : '';\n\n      // 次のノードに渡すための出力データを作成します\n      const outputData = {\n        // ▼▼▼ ここから追加したフィールドです ▼▼▼\n        順位: inputItem.json.順位 !== undefined ? inputItem.json.順位 : index + 1,\n        取得日: inputItem.json.取得日 || new Date().toISOString().split(\"T\")[0],\n        検索カテゴリ: inputItem.json.検索カテゴリ || null,\n        ソート順: inputItem.json.ソート順 || \"NEW\",\n        // ▲▲▲ ここまで追加したフィールドです ▲▲▲\n        \n        // --- 以下は前回から引き継いだフィールドです ---\n        サムネイル: thumbnailFormula,\n        タイトル: normalItem.title,\n        女優名: actorName,\n        URL: normalItem.URL,\n        検索URL: searchUrl, //← こちらが抽出したかったURLです\n        アフィリエイトURL: normalItem.affiliateURL,\n      };\n\n      // 処理結果を最終出力配列に追加します\n      finalResults.push({ json: outputData });\n    }\n    // 通常商品が見つからなかった場合は、何もせずスキップします\n  }\n}\n\n// 整形した結果をn8nの次のノードに渡します\nreturn finalResults;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1216,
+          -16
+        ],
+        "id": "f2e39b40-5fc6-48d7-b3a7-ef2f2b1bb287",
+        "name": "数量限定の除外し、1位のみ取得"
+      },
+      {
+        "parameters": {
+          "jsCode": "// n8n Code Node - 修正版\n// DMM Affiliate APIのレスポンスから「限定」商品を除外し、条件に合う通常商品の情報をすべて抽出します。\n// また、前のノードから渡された「順位」「取得日」などの共通情報も各商品に引き継ぎます。\n\n// 最終的な出力結果を格納する配列\nconst finalResults = [];\n\n// n8nの入力アイテム (items) を一つずつ処理します\n// itemsは前のノードからの出力の配列です\nfor (const [index, inputItem] of items.entries()) {\n  // 入力データにAPIレスポンスの商品リスト(items)が存在するか確認します\n  if (inputItem.json && inputItem.json.result && Array.isArray(inputItem.json.result.items)) {\n    const apiItems = inputItem.json.result.items;\n\n    // ▼▼▼【変更点1】find を filter に変更 ▼▼▼\n    // 商品リストの中から「限定」や「チェキ付き」というキーワードを含まない通常商品を\"すべて\"抽出します\n    const normalItems = apiItems.filter(item =>\n      !item.title.includes('【数量限定】') && !item.title.includes('チェキ付き') && !item.title.includes('BOD')&& !item.title.includes('ブルーレイディスク')\n    );\n\n    // ▼▼▼【変更点2】抽出した全商品をループ処理 ▼▼▼\n    // 抽出された通常商品が複数ある場合、それぞれを整形して結果に追加します\n    for (const normalItem of normalItems) {\n      // 女優名を抽出します (存在しない場合も考慮します)\n      let actorName = '';\n      if (normalItem.iteminfo && Array.isArray(normalItem.iteminfo.actor) && normalItem.iteminfo.actor.length > 0) {\n        // 複数の女優がいる場合も考慮し、カンマ区切りで連結します\n        actorName = normalItem.iteminfo.actor.map(a => a.name).join(', ');\n      }\n\n      // 女優名＋タイトル名での検索URLを生成します\n      const cleanTitle = normalItem.title.replace(`/${actorName}`, '').trim();\n      const searchKeyword = actorName ? `${actorName} ${cleanTitle}` : cleanTitle;\n      const encodedKeyword = encodeURIComponent(searchKeyword);\n      const searchUrl = `https://affiliate.dmm.com/search_link?site=dmm&affiliateId=cycreator-003&service=mono&floor=dvd&sort=date&keyword=${encodedKeyword}`;\n\n      // サムネイル画像をIMAGE関数形式に変換します\n      const thumbnailUrl = normalItem.imageURL?.large || normalItem.imageURL?.small || '';\n      const thumbnailFormula = thumbnailUrl ? `=IMAGE(\"${thumbnailUrl}\", 2)` : '';\n\n      // 次のノードに渡すための出力データを作成します\n      const outputData = {\n        // 共通情報を前のノードから引き継ぎます\n        順位: inputItem.json.順位 !== undefined ? inputItem.json.順位 : index + 1,\n        取得日: inputItem.json.取得日 || new Date().toISOString().split(\"T\")[0],\n        検索カテゴリ: inputItem.json.検索カテゴリ || null,\n        ソート順: inputItem.json.ソート順 || \"NEW\",\n        \n        // 各商品の個別情報\n        サムネイル: thumbnailFormula,\n        タイトル: normalItem.title,\n        女優名: actorName,\n        URL: normalItem.URL,\n        検索URL: searchUrl,\n        アフィリエイトURL: normalItem.affiliateURL,\n      };\n\n      // 処理結果を最終出力配列に追加します\n      finalResults.push({ json: outputData });\n    }\n    // 該当する通常商品が見つからなかった場合は、このループは実行されず、何も出力されません\n  }\n}\n\n// 整形したすべての結果をn8nの次のノードに渡します\nreturn finalResults;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1184,
+          608
+        ],
+        "id": "89a0b745-2c11-429c-b4ae-8c2e5f7c22f2",
+        "name": "数量限定の除外し、全商品取得"
+      },
+      {
+        "parameters": {
+          "url": "=https://api.dmm.com/affiliate/v3/ItemList",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "api_id",
+                "value": "7er2FvHFgNaVSGyFDmnH"
+              },
+              {
+                "name": "affiliate_id",
+                "value": "cycreator-991"
+              },
+              {
+                "name": "site",
+                "value": "DMM.com"
+              },
+              {
+                "name": "service",
+                "value": "mono"
+              },
+              {
+                "name": "floor",
+                "value": "dvd"
+              },
+              {
+                "name": "hits",
+                "value": "10"
+              },
+              {
+                "name": "sort",
+                "value": "date"
+              },
+              {
+                "name": "keyword",
+                "value": "={{ $json['女優名'] }}"
+              },
+              {
+                "name": "output",
+                "value": "json"
+              }
+            ]
+          },
+          "options": {
+            "response": {}
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4,
+        "position": [
+          992,
+          608
+        ],
+        "name": "DMM API Request（女優名検索）",
+        "id": "e54cfa64-fab8-43c6-bffe-db6f868e3424"
+      },
+      {
+        "parameters": {
+          "url": "=https://api.dmm.com/affiliate/v3/ItemList",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "api_id",
+                "value": "7er2FvHFgNaVSGyFDmnH"
+              },
+              {
+                "name": "affiliate_id",
+                "value": "cycreator-991"
+              },
+              {
+                "name": "site",
+                "value": "DMM.com"
+              },
+              {
+                "name": "service",
+                "value": "mono"
+              },
+              {
+                "name": "floor",
+                "value": "dvd"
+              },
+              {
+                "name": "hits",
+                "value": "4"
+              },
+              {
+                "name": "sort",
+                "value": "date"
+              },
+              {
+                "name": "keyword",
+                "value": "={{ $json[\"タイトル\"] }}"
+              },
+              {
+                "name": "output",
+                "value": "json"
+              }
+            ]
+          },
+          "options": {
+            "response": {}
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4,
+        "position": [
+          960,
+          -16
+        ],
+        "name": "DMM API Request（ランキング抽出）",
+        "id": "e01cfc4d-32dc-45ed-9987-6f2341bc1ddc"
+      },
+      {
+        "parameters": {
+          "operation": "appendOrUpdate",
+          "documentId": {
+            "__rl": true,
+            "value": "1q4p-LHH3i5SR-Kod2qX669dYciR4KBhz-6ob-1ub6us",
+            "mode": "list",
+            "cachedResultName": "DMM_画像分析",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1q4p-LHH3i5SR-Kod2qX669dYciR4KBhz-6ob-1ub6us/edit?usp=drivesdk"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": 785051468,
+            "mode": "list",
+            "cachedResultName": "n8n_個別取得リスト",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1q4p-LHH3i5SR-Kod2qX669dYciR4KBhz-6ob-1ub6us/edit#gid=785051468"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "アフィリエイトURL": "={{ $json['アフィリエイトURL'] }}",
+              "タイトル+女優名検索URL": "={{ $json.URL }}",
+              "検索URL": "={{ $json.URL }}",
+              "サムネイル": "={{ $json['サムネイル'] }}",
+              "ソート順": "={{ $json['ソート順'] }}",
+              "検索カテゴリ": "={{ $json['検索カテゴリ'] }}",
+              "取得日": "={{ $json['取得日'] }}",
+              "タイトル": "={{ $json['タイトル'] }}",
+              "女優名": "={{ $json['女優名'] }}"
+            },
+            "matchingColumns": [
+              "タイトル"
+            ],
+            "schema": [
+              {
+                "id": "順位",
+                "displayName": "順位",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": true
+              },
+              {
+                "id": "取得日",
+                "displayName": "取得日",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "検索カテゴリ",
+                "displayName": "検索カテゴリ",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "ソート順",
+                "displayName": "ソート順",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "サムネイル",
+                "displayName": "サムネイル",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "タイトル",
+                "displayName": "タイトル",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "女優名",
+                "displayName": "女優名",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "URL",
+                "displayName": "URL",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": true
+              },
+              {
+                "id": "検索URL",
+                "displayName": "検索URL",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "タイトル+女優名検索URL",
+                "displayName": "タイトル+女優名検索URL",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "アフィリエイトURL",
+                "displayName": "アフィリエイトURL",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          1456,
+          608
+        ],
+        "id": "05a6de8c-8b3d-4211-8405-9bd8f1109641",
+        "name": "スプシ書き込み2",
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "3EJKxUoo3vyq8YnS",
+            "name": "Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "1q4p-LHH3i5SR-Kod2qX669dYciR4KBhz-6ob-1ub6us",
+            "mode": "list",
+            "cachedResultName": "DMM_画像分析",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1q4p-LHH3i5SR-Kod2qX669dYciR4KBhz-6ob-1ub6us/edit?usp=drivesdk"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": 710542172,
+            "mode": "list",
+            "cachedResultName": "gform",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1q4p-LHH3i5SR-Kod2qX669dYciR4KBhz-6ob-1ub6us/edit#gid=710542172"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          880,
+          608
+        ],
+        "id": "3f7495f0-78b5-4589-b830-2650765932b5",
+        "name": "女優名書込み(AppSheet",
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "3EJKxUoo3vyq8YnS",
+            "name": "Google Sheets account"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "When clicking ‘Execute workflow’": {
+        "main": [
+          [
+            {
+              "node": "DMMランキング取得",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Over Items": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 1
+            },
+            {
+              "node": "Wait",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Loop Over Items",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "スプシ用整形": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Items",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge": {
+        "main": [
+          [
+            {
+              "node": "数量限定の除外し、1位のみ取得",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "スプシ書き込み": {
+        "main": [
+          []
+        ]
+      },
+      "Wait": {
+        "main": [
+          [
+            {
+              "node": "DMM API Request（ランキング抽出）",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "X投稿用整形": {
+        "main": [
+          [
+            {
+              "node": "Xポスト管理DBへ",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Xポスト管理DBへ": {
+        "main": [
+          []
+        ]
+      },
+      "DMMランキング取得": {
+        "main": [
+          [
+            {
+              "node": "スプシ用整形",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "X投稿用整形1": {
+        "main": [
+          [
+            {
+              "node": "Xポスト管理DBへ1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "数量限定の除外し、1位のみ取得": {
+        "main": [
+          [
+            {
+              "node": "スプシ書き込み",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "数量限定の除外し、全商品取得": {
+        "main": [
+          [
+            {
+              "node": "スプシ書き込み2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "DMM API Request（女優名検索）": {
+        "main": [
+          [
+            {
+              "node": "数量限定の除外し、全商品取得",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "DMM API Request（ランキング抽出）": {
+        "main": [
+          [
+            {
+              "node": "Merge",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "スプシ書き込み2": {
+        "main": [
+          [
+            {
+              "node": "X投稿用整形1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "女優名書込み(AppSheet": {
+        "main": [
+          [
+            {
+              "node": "DMM API Request（女優名検索）",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "pinData": {},
+    "versionId": "6c3cc263-1002-44f4-9d28-9fc657f3fd60",
+    "triggerCount": 0,
+    "shared": [
+      {
+        "updatedAt": "2025-09-23T14:25:39.534Z",
+        "createdAt": "2025-09-23T14:25:39.534Z",
+        "role": "workflow:owner",
+        "workflowId": "K8R57QdpX4WqD5vB",
+        "projectId": "k28L1qYUGDK2NE0O"
+      }
+    ],
+    "tags": []
+  }
+]

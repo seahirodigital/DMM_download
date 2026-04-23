@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>動画視聴</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <button id="mobile-menu-button" class="mobile-menu-button" type="button" aria-label="メニューを開く" aria-expanded="false">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        <div class="topbar-spacer"></div>
+        <div class="topbar-right">
+          <div id="topbar-actions-slot" class="topbar-actions-slot">
+            <div id="topbar-actions" class="topbar-actions">
+              <div id="header-actions" class="header-actions"></div>
+              <button id="settings-toggle-button" class="icon-button" type="button" title="設定" aria-label="設定を開く">
+                ⚙
+              </button>
+            </div>
+          </div>
+          <p id="flash-message" class="flash-message"></p>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <button id="mobile-sidebar-backdrop" class="mobile-sidebar-backdrop" type="button" aria-label="メニューを閉じる" hidden></button>
+        <aside class="sidebar">
+          <nav class="sidebar-nav" aria-label="画面切り替え">
+            <button class="nav-button active" data-tab="dashboard" title="ダッシュボード" aria-label="ダッシュボード">
+              <span aria-hidden="true">▦</span>
+            </button>
+            <button class="nav-button" data-tab="history" title="履歴" aria-label="履歴">
+              <span aria-hidden="true">↺</span>
+            </button>
+            <button class="nav-button" data-tab="viewer" title="ビューアー" aria-label="ビューアー">
+              <span aria-hidden="true">▶</span>
+            </button>
+            <button class="nav-button" data-tab="favorites" title="お気に入り" aria-label="お気に入り">
+              <span aria-hidden="true">★</span>
+            </button>
+          </nav>
+          <div id="mobile-sidebar-actions" class="mobile-sidebar-actions"></div>
+          <div id="warning-list" class="warning-list"></div>
+          <div id="app-summary" class="sidebar-summary"></div>
+        </aside>
+
+        <main class="content">
+          <section id="dashboard-view" class="view active">
+            <div id="dashboard-metrics" class="section-block"></div>
+            <div id="dashboard-ranking" class="section-block"></div>
+          </section>
+
+          <section id="history-view" class="view">
+            <div id="history-content" class="section-block"></div>
+          </section>
+
+          <section id="favorites-view" class="view">
+            <div id="favorites-content" class="section-block"></div>
+          </section>
+
+          <section id="viewer-view" class="view">
+            <div class="section-block viewer-toolbar">
+              <div class="viewer-toolbar-row">
+                <button id="viewer-refresh-button" class="icon-button toolbar-icon-button" type="button" title="一覧を更新" aria-label="一覧を更新">
+                  ↻
+                </button>
+                <button id="viewer-open-local-button" class="ghost-button compact-toolbar-button" type="button">開く</button>
+                <input
+                  id="viewer-directory-input"
+                  class="text-input"
+                  type="text"
+                  placeholder="%USERPROFILE%\Downloads\DMM"
+                />
+                <button id="viewer-apply-directory-button" class="action-button compact-toolbar-button" type="button">開く</button>
+                <label class="toggle-line">
+                  <input id="viewer-autoplay-toggle" type="checkbox" />
+                  <span>次の動画を自動再生</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="viewer-layout">
+              <div class="viewer-stage">
+                <div class="player-wrap">
+                  <video id="viewer-player" controls playsinline preload="metadata"></video>
+                </div>
+                <div class="viewer-meta">
+                  <div class="viewer-now">
+                    <div class="viewer-now-label">
+                      <p class="eyebrow">再生中 <strong id="viewer-rate-display">1.0x</strong></p>
+                      <button id="shortcut-help-button" class="inline-help-button" type="button" title="ショートカット" aria-label="ショートカットを表示">
+                        !
+                      </button>
+                    </div>
+                    <h2 id="viewer-now-title">動画が選択されていません</h2>
+                  </div>
+                </div>
+              </div>
+
+              <aside class="playlist-panel">
+                <ul id="viewer-playlist" class="playlist"></ul>
+              </aside>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div id="settings-overlay" class="settings-overlay" hidden></div>
+    <aside id="settings-panel" class="settings-panel" aria-hidden="true" aria-labelledby="settings-panel-title">
+      <div class="settings-panel-header">
+        <div>
+          <p class="eyebrow">設定</p>
+          <h2 id="settings-panel-title">環境と保存設定</h2>
+        </div>
+        <button id="settings-close-button" class="icon-button icon-button-dark" type="button" title="閉じる" aria-label="設定を閉じる">
+          ×
+        </button>
+      </div>
+      <div id="settings-panel-content" class="settings-panel-content"></div>
+    </aside>
+
+    <div id="thumbnail-modal" class="thumbnail-modal" hidden>
+      <button id="thumbnail-modal-backdrop" class="thumbnail-modal-backdrop" type="button" aria-label="サムネイルを閉じる"></button>
+      <div class="thumbnail-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="thumbnail-modal-title">
+        <button id="thumbnail-modal-close-button" class="icon-button icon-button-dark thumbnail-modal-close" type="button" title="閉じる" aria-label="サムネイルを閉じる">
+          ×
+        </button>
+        <img id="thumbnail-modal-image" class="thumbnail-modal-image" alt="" />
+        <p id="thumbnail-modal-title" class="thumbnail-modal-title"></p>
+      </div>
+    </div>
+
+    <div id="shortcut-modal" class="thumbnail-modal shortcut-modal" hidden>
+      <button id="shortcut-modal-backdrop" class="thumbnail-modal-backdrop" type="button" aria-label="ショートカットを閉じる"></button>
+      <div class="thumbnail-modal-dialog shortcut-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcut-modal-title">
+        <button id="shortcut-modal-close-button" class="icon-button icon-button-dark thumbnail-modal-close" type="button" title="閉じる" aria-label="ショートカットを閉じる">
+          ×
+        </button>
+        <h2 id="shortcut-modal-title">ショートカット</h2>
+        <dl class="shortcut-help-list">
+          <div>
+            <dt>左右キー</dt>
+            <dd>5秒移動</dd>
+          </div>
+          <div>
+            <dt>上下キー</dt>
+            <dd>前後の動画へ移動</dd>
+          </div>
+          <div>
+            <dt>D / S</dt>
+            <dd>速度を0.1ずつ変更</dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+
+    <input id="viewer-folder-input" type="file" webkitdirectory multiple hidden />
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.min.js"></script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
