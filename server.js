@@ -7,7 +7,7 @@ const { Readable } = require('node:stream');
 const { getPublicConfig, loadConfig, saveConfigPatch } = require('./lib/config');
 const { DownloadManager } = require('./lib/download-manager');
 const { resolvePlayableSource } = require('./lib/dmm-downloader');
-const { fetchRanking } = require('./lib/ranking-service');
+const { fetchActressSearch, fetchRanking } = require('./lib/ranking-service');
 const { StateStore } = require('./lib/state-store');
 const {
   appendCsvRows,
@@ -509,6 +509,19 @@ async function createApp() {
     });
   }
 
+  async function handleActressSearch(request, response) {
+    const body = await readRequestBody(request);
+    const search = await fetchActressSearch(config, {
+      actress: body.actress,
+      pageSize: body.pageSize
+    });
+
+    sendJson(response, 200, {
+      ok: true,
+      search
+    });
+  }
+
   async function saveCookieHeader(cookieHeader) {
     const normalizedCookie = normalizeCookieHeader(cookieHeader);
     if (!normalizedCookie) {
@@ -878,6 +891,11 @@ async function createApp() {
 
       if (request.method === 'POST' && url.pathname === '/api/ranking/fetch') {
         await handleFetchRanking(request, response);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/search/actress') {
+        await handleActressSearch(request, response);
         return;
       }
 

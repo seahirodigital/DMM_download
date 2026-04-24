@@ -8,6 +8,7 @@ const state = {
   favoritePreviewPlayers: new Map(),
   favoriteSelectionMode: false,
   favorites: {},
+  headerActionsMode: '',
   history: [],
   library: {
     directory: '',
@@ -23,7 +24,19 @@ const state = {
   refreshTimer: null,
   renderCache: {
     dashboardRanking: '',
-    favorites: ''
+    favorites: '',
+    searchResults: ''
+  },
+  search: {
+    error: '',
+    fetchedAt: null,
+    items: [],
+    loading: false,
+    pageSize: 0,
+    pagesFetched: 0,
+    query: '',
+    sourcePageUrl: '',
+    total: 0
   },
   selectedDownloadKeys: new Set(),
   selectedFavoriteKeys: new Set(),
@@ -131,6 +144,7 @@ function setFavoriteSelectionMode(isEnabled) {
     state.selectedFavoriteKeys.clear();
   }
   renderFavorites();
+  syncFavoriteSelectionControls();
 }
 
 function toggleFavoriteSelectionMode() {
@@ -149,6 +163,7 @@ function toggleFavoriteSelection(key, isSelected = !state.selectedFavoriteKeys.h
   }
 
   renderFavorites();
+  syncFavoriteSelectionControls();
 }
 
 function normalizeFavoriteItem(item) {
@@ -204,6 +219,7 @@ function toggleFavorite(item) {
   pruneFavoritePreviewKeys();
   renderDashboardRanking();
   renderFavorites();
+  renderSearchResults();
 }
 
 function syncFavoritesWithRanking() {
@@ -290,6 +306,42 @@ function updateSelectionButton() {
     : '複数選択';
 }
 
+function syncSelectionControls(container, toggleSelector, playSelector, isActive, selectedCount) {
+  if (!container) {
+    return;
+  }
+
+  container.querySelectorAll(toggleSelector).forEach((button) => {
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-pressed', String(isActive));
+    button.textContent = isActive ? (selectedCount ? `選択中 ${selectedCount}` : '選択中') : '複数選択';
+  });
+
+  container.querySelectorAll(playSelector).forEach((button) => {
+    button.disabled = selectedCount === 0;
+  });
+}
+
+function syncDashboardSelectionControls() {
+  syncSelectionControls(
+    elements.dashboardRanking,
+    '[data-dashboard-selection-toggle]',
+    '[data-dashboard-selection-play]',
+    state.downloadSelectionMode,
+    state.selectedDownloadKeys.size
+  );
+}
+
+function syncFavoriteSelectionControls() {
+  syncSelectionControls(
+    elements.favoritesContent,
+    '[data-favorite-selection-toggle]',
+    '[data-favorite-selection-play]',
+    state.favoriteSelectionMode,
+    state.selectedFavoriteKeys.size
+  );
+}
+
 function setDownloadSelectionMode(isEnabled) {
   state.downloadSelectionMode = isEnabled;
   if (!isEnabled) {
@@ -302,6 +354,7 @@ function setDownloadSelectionMode(isEnabled) {
   renderDashboardRanking();
   renderHeaderActions();
   updateSelectionButton();
+  syncDashboardSelectionControls();
 }
 
 function toggleDownloadSelectionMode() {
@@ -320,6 +373,7 @@ function toggleDownloadSelection(key, isSelected) {
   }
 
   updateSelectionButton();
+  syncDashboardSelectionControls();
 }
 
 function setMobileMenuOpen(isOpen) {
@@ -400,6 +454,12 @@ function switchTab(tabName) {
   if (tabName === 'viewer') {
     refreshLibrary({ silent: true });
   }
+
+  if (tabName === 'search') {
+    renderSearchResults();
+  }
+
+  renderHeaderActions();
 }
 
 function renderWarnings() {
@@ -426,8 +486,51 @@ function renderSummary() {
   `;
 }
 
+function renderSearchHeaderActions() {
+  elements.headerActions.innerHTML = `
+    <form id="actress-search-form" class="header-search-form">
+      <label class="header-control header-search-control">
+        <span>女優名</span>
+        <input
+          id="actress-search-input"
+          class="text-input header-search-input"
+          type="search"
+          autocomplete="off"
+          value="${escapeHtml(state.search.query)}"
+          placeholder="女優名で検索"
+        />
+      </label>
+      <button id="header-actress-search-button" class="header-command-button" type="submit" ${state.search.loading ? 'disabled' : ''}>
+        ${state.search.loading ? '検索中' : '検索'}
+      </button>
+    </form>
+  `;
+
+  qs('actress-search-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    searchActress();
+  });
+  qs('actress-search-input')?.addEventListener('input', () => {
+    state.controlsDirty = true;
+  });
+}
+
 function renderHeaderActions() {
-  if (!state.snapshot || state.controlsDirty) {
+  if (!state.snapshot) {
+    return;
+  }
+
+  const mode = state.tab === 'search' ? 'search' : 'ranking';
+  if (state.headerActionsMode && state.headerActionsMode !== mode) {
+    state.controlsDirty = false;
+  }
+  if (state.controlsDirty && state.headerActionsMode === mode) {
+    return;
+  }
+  state.headerActionsMode = mode;
+
+  if (mode === 'search') {
+    renderSearchHeaderActions();
     return;
   }
 
@@ -679,6 +782,19 @@ async function getPreviewInfo(item) {
     return Promise.resolve(cached);
   }
 
+  if (!item?.seasonId && item?.playbackUrl) {
+    const resolved = {
+      playbackUrl: item.playbackUrl,
+      type: 'direct'
+    };
+    previewInfoCache.set(cacheKey, resolved);
+    return resolved;
+  }
+
+  if (!item?.seasonId) {
+    throw new Error('このコンテンツにはページ内プレビュー用の動画情報がありません。');
+  }
+
   const pending = requestJson(buildPreviewInfoUrl(item)).then((payload) => {
     const resolved = {
       playbackUrl: payload.playbackUrl || buildPreviewUrl(item),
@@ -801,6 +917,7 @@ async function attachPreviewSource(video, item, options = {}) {
   const {
     autoplay = false,
     muted = false,
+    onAutoplayBlocked,
     onError,
     onReady,
     playerKey = '',
@@ -825,7 +942,9 @@ async function attachPreviewSource(video, item, options = {}) {
   const handleReady = () => {
     onReady?.(info);
     if (autoplay) {
-      video.play().catch(() => {});
+      video.play().catch((error) => {
+        onAutoplayBlocked?.(error);
+      });
     }
   };
 
@@ -899,7 +1018,7 @@ function rankingSectionSignature(options) {
         actress: item.actress || '',
         favorite: isFavorite(item),
         key,
-        playbackUrl: item.playbackUrl || buildPlaybackUrl(item),
+        playbackUrl: item.playbackUrl || item.detailUrl || buildPlaybackUrl(item),
         rank: item.rank ?? '',
         seasonId: item.seasonId || '',
         selectedForDownload: state.selectedDownloadKeys.has(downloadKey),
@@ -952,7 +1071,8 @@ function renderRankingSection(container, options) {
                 const downloadKey = getDownloadKey(item);
                 const selectionKey =
                   selectionKind === 'download' ? downloadKey : selectionKind === 'favorite' ? key : '';
-                const playbackUrl = item.playbackUrl || buildPlaybackUrl(item);
+                const playbackUrl = item.playbackUrl || item.detailUrl || buildPlaybackUrl(item);
+                const hasPreview = Boolean(item.seasonId || item.playbackUrl);
                 const favorite = isFavorite(item);
                 const selectable = Boolean(selectionMode && selectionKey);
                 const selectedForSelection = selectionKey ? selectedKeys.has(selectionKey) : false;
@@ -1019,7 +1139,7 @@ function renderRankingSection(container, options) {
                           >
                             サムネイル
                           </button>
-                          <button class="watch-button" type="button" data-preview-key="${escapeHtml(key)}" title="再生">
+                          <button class="watch-button" type="button" data-preview-key="${escapeHtml(key)}" title="再生" ${hasPreview ? '' : 'disabled'}>
                             <span aria-hidden="true">▶</span>
                           </button>
                         </div>
@@ -1111,7 +1231,7 @@ function bindRankingCardActions(container, items, options = {}) {
       }
 
       if (!supportsInlinePreview()) {
-        window.open(item.playbackUrl || buildPlaybackUrl(item), '_blank', 'noopener,noreferrer');
+        window.open(item.playbackUrl || item.detailUrl || buildPlaybackUrl(item), '_blank', 'noopener,noreferrer');
         return;
       }
 
@@ -1168,6 +1288,9 @@ function renderDashboardRanking() {
         ? renderInlinePreviewSection(activePreviewItems, {
             closeAction: 'dashboard',
             heading: 'ダウンロード候補内で再生',
+            selectedCount,
+            selectionAction: 'dashboard',
+            selectionMode: state.downloadSelectionMode,
             showFavoriteToggle: true
           })
         : '',
@@ -1182,11 +1305,15 @@ function renderDashboardRanking() {
     }),
     items: rankingItems,
     onAfterRender: () => {
-      elements.dashboardRanking?.querySelector('[data-dashboard-selection-toggle]')?.addEventListener('click', () => {
-        toggleDownloadSelectionMode();
+      elements.dashboardRanking?.querySelectorAll('[data-dashboard-selection-toggle]').forEach((button) => {
+        button.addEventListener('click', () => {
+          toggleDownloadSelectionMode();
+        });
       });
-      elements.dashboardRanking?.querySelector('[data-dashboard-selection-play]')?.addEventListener('click', () => {
-        openDashboardInlinePreviews([...state.selectedDownloadKeys]);
+      elements.dashboardRanking?.querySelectorAll('[data-dashboard-selection-play]').forEach((button) => {
+        button.addEventListener('click', () => {
+          openDashboardInlinePreviews([...state.selectedDownloadKeys]);
+        });
       });
       elements.dashboardRanking?.querySelector('[data-inline-preview-close="dashboard"]')?.addEventListener('click', () => {
         closeDashboardInlinePreviews();
@@ -1209,13 +1336,94 @@ function renderDashboardRanking() {
   });
 }
 
+function renderSearchResults() {
+  if (!elements.searchResults) {
+    return;
+  }
+
+  const search = state.search;
+  const statusText = search.loading
+    ? 'DMM検索を実行中です。'
+    : search.error
+      ? search.error
+      : search.items.length
+        ? `${search.items.length}件を表示中${search.total ? ` / 全${search.total}件` : ''}`
+        : 'ヘッダーの検索フォームから女優名を入力してください。';
+
+  renderRankingSection(elements.searchResults, {
+    cacheKey: 'searchResults',
+    emptyText: search.query ? '該当するコンテンツは見つかりませんでした。' : '検索キーワードを入力してください。',
+    eyebrow: 'DMM検索',
+    headerAsideSignature: JSON.stringify({
+      error: search.error,
+      fetchedAt: search.fetchedAt,
+      loading: search.loading,
+      pagesFetched: search.pagesFetched,
+      query: search.query,
+      statusText,
+      total: search.total
+    }),
+    items: search.items,
+    previewMode: 'default',
+    statusText,
+    title: search.query ? `${search.query} のコンテンツ` : '女優名検索'
+  });
+}
+
+function renderInlinePreviewSelectionControls(options = {}) {
+  const { selectionAction = '', selectionMode = false, selectedCount = 0 } = options;
+  const actionAttributes = {
+    dashboard: {
+      play: 'data-dashboard-selection-play',
+      toggle: 'data-dashboard-selection-toggle'
+    },
+    favorites: {
+      play: 'data-favorite-selection-play',
+      toggle: 'data-favorite-selection-toggle'
+    }
+  }[selectionAction];
+
+  if (!actionAttributes) {
+    return '';
+  }
+
+  return `
+    <button
+      type="button"
+      class="header-command-button inline-selection-toggle ${selectionMode ? 'active' : ''}"
+      ${actionAttributes.toggle}
+      aria-pressed="${selectionMode ? 'true' : 'false'}"
+    >
+      ${selectionMode ? (selectedCount ? `選択中 ${selectedCount}` : '選択中') : '複数選択'}
+    </button>
+    <button
+      type="button"
+      class="icon-button favorite-header-play-button inline-selection-play-button"
+      ${actionAttributes.play}
+      title="選択した動画を同時再生"
+      aria-label="選択した動画を同時再生"
+      ${selectedCount ? '' : 'disabled'}
+    >
+      <span aria-hidden="true">&#9654;</span>
+    </button>
+  `;
+}
+
 function renderInlinePreviewSection(items, options = {}) {
   const multiple = items.length > 1;
   const {
     closeAction = '',
     heading = 'ブックマーク内で再生',
+    selectedCount = 0,
+    selectionAction = '',
+    selectionMode = false,
     showFavoriteToggle = false
   } = options;
+  const selectionControlsHtml = renderInlinePreviewSelectionControls({
+    selectedCount,
+    selectionAction,
+    selectionMode
+  });
   return `
     <section class="favorite-preview-section">
       <div class="favorite-preview-header">
@@ -1223,9 +1431,12 @@ function renderInlinePreviewSection(items, options = {}) {
           <p class="eyebrow">同時再生</p>
           <h3>${escapeHtml(heading)}</h3>
         </div>
-        <button type="button" class="ghost-button favorite-preview-close-button" data-inline-preview-close="${escapeHtml(closeAction)}">
-          閉じる
-        </button>
+        <div class="favorite-preview-header-actions">
+          ${selectionControlsHtml}
+          <button type="button" class="ghost-button favorite-preview-close-button" data-inline-preview-close="${escapeHtml(closeAction)}">
+            閉じる
+          </button>
+        </div>
       </div>
       <div class="favorite-preview-grid ${multiple ? 'favorite-preview-grid-multi' : 'favorite-preview-grid-single'}">
         ${items
@@ -1304,9 +1515,12 @@ async function mountFavoriteInlinePreviews(items) {
       try {
         await attachPreviewSource(video, item, {
           autoplay: true,
-          muted: items.length > 1,
+          muted: true,
           onError: () => {
             status.textContent = '読み込み失敗';
+          },
+          onAutoplayBlocked: () => {
+            status.textContent = 'プレイヤーの再生ボタンを押してください';
           },
           onReady: () => {
             status.textContent = '';
@@ -1379,9 +1593,12 @@ async function mountDashboardInlinePreviews(items) {
       try {
         await attachPreviewSource(video, item, {
           autoplay: true,
-          muted: items.length > 1,
+          muted: true,
           onError: () => {
             status.textContent = '読み込み失敗';
+          },
+          onAutoplayBlocked: () => {
+            status.textContent = 'プレイヤーの再生ボタンを押してください';
           },
           onReady: () => {
             status.textContent = '';
@@ -1487,7 +1704,10 @@ function renderFavorites() {
       allowInlinePlayback && activePreviewItems.length
         ? renderInlinePreviewSection(activePreviewItems, {
             closeAction: 'favorites',
-            heading: 'ブックマーク内で再生'
+            heading: 'ブックマーク内で再生',
+            selectedCount: selectionCount,
+            selectionAction: 'favorites',
+            selectionMode: state.favoriteSelectionMode
           })
         : '',
     footerSignature: allowInlinePlayback ? activePreviewItems.map(getItemKey).join(',') : '',
@@ -1501,11 +1721,15 @@ function renderFavorites() {
     }),
     items: favoriteItems,
     onAfterRender: () => {
-      elements.favoritesContent?.querySelector('[data-favorite-selection-toggle]')?.addEventListener('click', () => {
-        toggleFavoriteSelectionMode();
+      elements.favoritesContent?.querySelectorAll('[data-favorite-selection-toggle]').forEach((button) => {
+        button.addEventListener('click', () => {
+          toggleFavoriteSelectionMode();
+        });
       });
-      elements.favoritesContent?.querySelector('[data-favorite-selection-play]')?.addEventListener('click', () => {
-        openFavoriteInlinePreviews([...state.selectedFavoriteKeys]);
+      elements.favoritesContent?.querySelectorAll('[data-favorite-selection-play]').forEach((button) => {
+        button.addEventListener('click', () => {
+          openFavoriteInlinePreviews([...state.selectedFavoriteKeys]);
+        });
       });
       elements.favoritesContent?.querySelector('[data-inline-preview-close="favorites"]')?.addEventListener('click', () => {
         closeFavoriteInlinePreviews();
@@ -1851,6 +2075,7 @@ async function refreshState(options = {}) {
   renderDashboardMetrics();
   renderDashboardRanking();
   renderFavorites();
+  renderSearchResults();
 
   if (isHostedMode()) {
     document.querySelector('[data-tab="viewer"]')?.setAttribute('hidden', 'hidden');
@@ -1959,6 +2184,64 @@ async function clearCookie() {
     await refreshState();
     showMessage('保存済みCookieを削除しました。', 'success');
   } catch (error) {
+    showMessage(error.message, 'error');
+  }
+}
+
+async function searchActress() {
+  const input = qs('actress-search-input');
+  const actress = String(input?.value || state.search.query || '').trim();
+  if (!actress) {
+    showMessage('検索する女優名を入力してください。', 'error');
+    input?.focus();
+    return;
+  }
+
+  state.search = {
+    ...state.search,
+    error: '',
+    items: [],
+    loading: true,
+    query: actress,
+    total: 0
+  };
+  state.controlsDirty = false;
+  state.renderCache.searchResults = '';
+  renderHeaderActions();
+  renderSearchResults();
+
+  try {
+    const result = await requestJson('/api/search/actress', {
+      body: JSON.stringify({
+        actress,
+        pageSize: 100
+      }),
+      method: 'POST'
+    });
+    state.search = {
+      error: '',
+      fetchedAt: result.search?.fetchedAt || null,
+      items: result.search?.items || [],
+      loading: false,
+      pageSize: result.search?.pageSize || 0,
+      pagesFetched: result.search?.pagesFetched || 0,
+      query: result.search?.query || actress,
+      sourcePageUrl: result.search?.sourcePageUrl || '',
+      total: result.search?.total || 0
+    };
+    state.renderCache.searchResults = '';
+    renderHeaderActions();
+    renderSearchResults();
+    showMessage(`${state.search.query} の検索結果を取得しました。`, 'success');
+  } catch (error) {
+    state.search = {
+      ...state.search,
+      error: error.message,
+      loading: false
+    };
+    state.renderCache.searchResults = '';
+    renderHeaderActions();
+    renderSearchResults();
     showMessage(error.message, 'error');
   }
 }
@@ -2347,6 +2630,7 @@ async function boot() {
   elements.previewModalMeta = qs('preview-modal-meta');
   elements.previewModalTitle = qs('preview-modal-title');
   elements.previewPlayer = qs('preview-player');
+  elements.searchResults = qs('search-results');
   elements.thumbnailModal = qs('thumbnail-modal');
   elements.thumbnailModalBackdrop = qs('thumbnail-modal-backdrop');
   elements.thumbnailModalCloseButton = qs('thumbnail-modal-close-button');

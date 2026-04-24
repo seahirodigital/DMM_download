@@ -23,7 +23,15 @@
     "cookieHeader": ""
   },
   "affiliate": {
-    "searchAffiliateId": "cycreator-003"
+    "searchAffiliateId": "cycreator-003",
+    "apiId": "",
+    "itemListAffiliateId": "",
+    "itemListEndpoint": "https://api.dmm.com/affiliate/v3/ItemList",
+    "itemListSite": "DMM.com",
+    "itemListService": "mono",
+    "itemListFloor": "dvd",
+    "itemListSort": "date",
+    "itemListHits": 100
   },
   "downloads": {
     "defaultLimit": 5,

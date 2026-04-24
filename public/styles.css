@@ -174,6 +174,13 @@ a:hover {
   gap: 8px;
 }
 
+.header-search-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .header-control {
   display: inline-flex;
   align-items: center;
@@ -199,6 +206,20 @@ a:hover {
   border-radius: var(--pill-radius);
   border-color: rgba(255, 255, 255, 0.32);
   text-align: center;
+}
+
+.header-search-control {
+  flex: 1 1 340px;
+  min-width: 240px;
+  padding-right: 8px;
+}
+
+.header-control .header-search-input {
+  width: min(300px, 34vw);
+  min-height: 34px;
+  padding: 0 12px;
+  border-color: rgba(255, 255, 255, 0.32);
+  border-radius: var(--pill-radius);
 }
 
 .header-command-button {
@@ -1160,13 +1181,14 @@ tbody tr:hover {
   font-size: 0.82rem;
 }
 
-.thumbnail-button:disabled {
+.thumbnail-button:disabled,
+.watch-button:disabled {
   cursor: default;
   opacity: 0.45;
 }
 
 .thumbnail-button:hover:not(:disabled),
-.watch-button:hover {
+.watch-button:hover:not(:disabled) {
   background: #f5fbf8;
   text-decoration: none;
 }
@@ -1334,6 +1356,25 @@ tbody tr:hover {
   gap: 12px;
 }
 
+.favorite-preview-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.inline-selection-toggle {
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.inline-selection-play-button {
+  width: 36px;
+  height: 36px;
+  font-size: 1rem;
+}
+
 .favorite-preview-header h3 {
   margin: 0;
   font-size: 1.1rem;
@@ -1455,6 +1496,16 @@ tbody tr:hover {
 }
 
 @media (max-width: 960px) {
+  .favorite-preview-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .favorite-preview-header-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
   .favorite-preview-grid-multi {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1834,7 +1885,7 @@ tbody tr:hover {
   }
 
   .sidebar-nav {
-    grid-template-columns: repeat(4, 48px);
+    grid-template-columns: repeat(5, 48px);
     justify-content: start;
   }
 
@@ -1857,6 +1908,20 @@ tbody tr:hover {
     justify-content: space-between;
     width: 100%;
     min-height: 42px;
+  }
+
+  .mobile-sidebar-actions .header-search-form {
+    display: grid;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .mobile-sidebar-actions .header-search-control {
+    min-width: 0;
+  }
+
+  .mobile-sidebar-actions .header-search-input {
+    width: 100%;
   }
 
   .mobile-sidebar-actions .header-number-input {
