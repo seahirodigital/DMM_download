@@ -137,6 +137,20 @@
       </div>
     </div>
 
+    <div id="preview-modal" class="thumbnail-modal preview-modal" hidden>
+      <button id="preview-modal-backdrop" class="thumbnail-modal-backdrop" type="button" aria-label="動画プレビューを閉じる"></button>
+      <div class="thumbnail-modal-dialog preview-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
+        <button id="preview-modal-close-button" class="icon-button icon-button-dark thumbnail-modal-close" type="button" title="閉じる" aria-label="動画プレビューを閉じる">
+          ×
+        </button>
+        <div class="preview-player-wrap">
+          <video id="preview-player" class="preview-player" controls playsinline preload="metadata"></video>
+        </div>
+        <p id="preview-modal-meta" class="preview-modal-meta"></p>
+        <p id="preview-modal-title" class="thumbnail-modal-title"></p>
+      </div>
+    </div>
+
     <div id="shortcut-modal" class="thumbnail-modal shortcut-modal" hidden>
       <button id="shortcut-modal-backdrop" class="thumbnail-modal-backdrop" type="button" aria-label="ショートカットを閉じる"></button>
       <div class="thumbnail-modal-dialog shortcut-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcut-modal-title">

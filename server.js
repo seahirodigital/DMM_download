@@ -2,9 +2,11 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const http = require('node:http');
 const path = require('node:path');
+const { Readable } = require('node:stream');
 
 const { getPublicConfig, loadConfig, saveConfigPatch } = require('./lib/config');
 const { DownloadManager } = require('./lib/download-manager');
+const { resolvePlayableSource } = require('./lib/dmm-downloader');
 const { fetchRanking } = require('./lib/ranking-service');
 const { StateStore } = require('./lib/state-store');
 const {
@@ -98,6 +100,56 @@ function sendText(response, statusCode, message) {
     'Content-Type': 'text/plain; charset=utf-8'
   });
   response.end(message);
+}
+
+function parseAttributeList(line) {
+  const attributes = {};
+  const text = line.includes(':') ? line.slice(line.indexOf(':') + 1) : line;
+  const pattern = /([A-Z0-9-]+)=("[^"]*"|[^,]*)/gi;
+
+  for (const match of text.matchAll(pattern)) {
+    attributes[match[1]] = match[2].replace(/^"|"$/g, '');
+  }
+
+  return attributes;
+}
+
+function parseMasterPlaylist(manifestUrl, manifestText) {
+  const lines = manifestText.split(/\r?\n/).map((line) => line.trim());
+  const variants = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.startsWith('#EXT-X-STREAM-INF')) {
+      continue;
+    }
+
+    const attributes = parseAttributeList(line);
+    const nextLine = lines[index + 1];
+    if (!nextLine || nextLine.startsWith('#')) {
+      continue;
+    }
+
+    variants.push({
+      bandwidth: Number(attributes.BANDWIDTH || 0),
+      url: new URL(nextLine, manifestUrl).toString()
+    });
+  }
+
+  if (!variants.length) {
+    return null;
+  }
+
+  variants.sort((left, right) => right.bandwidth - left.bandwidth);
+  return variants[0].url;
+}
+
+function encodeProxyUrl(value) {
+  return Buffer.from(String(value || ''), 'utf8').toString('base64');
+}
+
+function decodeProxyUrl(value) {
+  return Buffer.from(String(value || ''), 'base64').toString('utf8');
 }
 
 async function readRequestBody(request) {
@@ -204,6 +256,7 @@ async function createApp() {
   const downloadManager = new DownloadManager(config, stateStore);
   const publicDir = path.join(process.cwd(), 'public');
   const rankingHistoryCsv = path.join(process.cwd(), 'data', 'history', 'ranking-history.csv');
+  const previewSourceCache = new Map();
 
   function buildSnapshot() {
     const warnings = [];
@@ -224,6 +277,150 @@ async function createApp() {
       settings: stateStore.getSettings(),
       warnings
     };
+  }
+
+  function buildPreviewHeaders(refererUrl) {
+    const headers = {
+      Origin: config.ranking.origin,
+      Referer: refererUrl || config.ranking.referer,
+      'User-Agent': config.ranking.userAgent
+    };
+
+    if (config.dmm.cookieHeader) {
+      headers.Cookie = config.dmm.cookieHeader;
+    }
+
+    return headers;
+  }
+
+  function buildPreviewItem(url) {
+    const seasonId = String(url.searchParams.get('season') || '').trim();
+    const contentId = String(url.searchParams.get('content') || seasonId).trim();
+    if (!seasonId) {
+      throw new Error('Preview season parameter is required.');
+    }
+
+    const rankingItem = stateStore
+      .getRanking()
+      ?.items?.find((item) => String(item.seasonId || '') === seasonId || String(item.contentId || '') === contentId);
+
+    if (rankingItem) {
+      return {
+        ...rankingItem,
+        contentId: rankingItem.contentId || contentId || rankingItem.seasonId
+      };
+    }
+
+    return {
+      contentId: contentId || seasonId,
+      detailUrl: `https://tv.dmm.com/vod/detail/?season=${encodeURIComponent(seasonId)}`,
+      seasonId
+    };
+  }
+
+  async function resolvePreviewSource(item) {
+    const cacheKey = `${item.seasonId}:${item.contentId || item.seasonId}`;
+    const cached = previewSourceCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.source;
+    }
+
+    const source = await resolvePlayableSource(item, config);
+    previewSourceCache.set(cacheKey, {
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      source
+    });
+    return source;
+  }
+
+  async function fetchPreviewText(targetUrl, refererUrl) {
+    const response = await fetch(targetUrl, {
+      headers: buildPreviewHeaders(refererUrl),
+      signal: AbortSignal.timeout(config.downloads.requestTimeoutMs)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch preview manifest: ${response.status} ${targetUrl}`);
+    }
+
+    return response.text();
+  }
+
+  function buildPreviewAssetUrl(request, assetUrl, refererUrl) {
+    const proxyUrl = new URL('/api/preview/asset', `http://${request.headers.host || '127.0.0.1'}`);
+    proxyUrl.searchParams.set('url', encodeProxyUrl(assetUrl));
+    proxyUrl.searchParams.set('referer', refererUrl || config.ranking.referer);
+    return proxyUrl.pathname + proxyUrl.search;
+  }
+
+  function rewriteManifestAttribute(line, manifestUrl, request, refererUrl) {
+    return line.replace(/(URI=)("[^"]*"|[^,]*)/i, (_, prefix, rawValue) => {
+      const normalized = String(rawValue || '').replace(/^"|"$/g, '');
+      const resolved = new URL(normalized, manifestUrl).toString();
+      return `${prefix}"${buildPreviewAssetUrl(request, resolved, refererUrl)}"`;
+    });
+  }
+
+  function rewriteMediaPlaylist(manifestUrl, manifestText, request, refererUrl) {
+    return manifestText
+      .split(/\r?\n/)
+      .map((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return line;
+        }
+
+        if (trimmed.startsWith('#EXT-X-KEY:') || trimmed.startsWith('#EXT-X-MAP:')) {
+          return rewriteManifestAttribute(line, manifestUrl, request, refererUrl);
+        }
+
+        if (trimmed.startsWith('#')) {
+          return line;
+        }
+
+        const resolved = new URL(trimmed, manifestUrl).toString();
+        return buildPreviewAssetUrl(request, resolved, refererUrl);
+      })
+      .join('\n');
+  }
+
+  async function proxyPreviewAsset(targetUrl, refererUrl, request, response) {
+    const headers = buildPreviewHeaders(refererUrl);
+    if (request.headers.range) {
+      headers.Range = request.headers.range;
+    }
+
+    const remoteResponse = await fetch(targetUrl, {
+      headers,
+      signal: AbortSignal.timeout(config.downloads.requestTimeoutMs)
+    });
+
+    if (!remoteResponse.ok && remoteResponse.status !== 206) {
+      throw new Error(`Failed to stream preview asset: ${remoteResponse.status} ${targetUrl}`);
+    }
+
+    const responseHeaders = {
+      'Cache-Control': 'no-store',
+      'Content-Type': remoteResponse.headers.get('content-type') || 'application/octet-stream'
+    };
+
+    for (const [headerName, headerValue] of [
+      ['Accept-Ranges', remoteResponse.headers.get('accept-ranges')],
+      ['Content-Length', remoteResponse.headers.get('content-length')],
+      ['Content-Range', remoteResponse.headers.get('content-range')]
+    ]) {
+      if (headerValue) {
+        responseHeaders[headerName] = headerValue;
+      }
+    }
+
+    response.writeHead(remoteResponse.status, responseHeaders);
+    if (remoteResponse.body) {
+      Readable.fromWeb(remoteResponse.body).pipe(response);
+      return;
+    }
+
+    response.end();
   }
 
   async function handleState(response) {
@@ -551,6 +748,54 @@ async function createApp() {
     fs.createReadStream(filePath, { start, end }).pipe(response);
   }
 
+  async function handlePreviewPlay(url, request, response) {
+    const item = buildPreviewItem(url);
+    const source = await resolvePreviewSource(item);
+    const refererUrl = source.detailUrl || item.detailUrl || config.ranking.referer;
+
+    if (source.type !== 'hls') {
+      await proxyPreviewAsset(source.url, refererUrl, request, response);
+      return;
+    }
+
+    let manifestUrl = source.url;
+    let manifestText = await fetchPreviewText(manifestUrl, refererUrl);
+    const highestVariantUrl = parseMasterPlaylist(manifestUrl, manifestText);
+    if (highestVariantUrl) {
+      manifestUrl = highestVariantUrl;
+      manifestText = await fetchPreviewText(manifestUrl, refererUrl);
+    }
+
+    const rewrittenPlaylist = rewriteMediaPlaylist(manifestUrl, manifestText, request, refererUrl);
+    response.writeHead(200, {
+      'Cache-Control': 'no-store',
+      'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8'
+    });
+    response.end(rewrittenPlaylist);
+  }
+
+  async function handlePreviewAsset(url, request, response) {
+    const encodedUrl = url.searchParams.get('url');
+    const refererUrl = url.searchParams.get('referer') || config.ranking.referer;
+    if (!encodedUrl) {
+      sendJson(response, 400, {
+        error: 'Preview asset url is required.'
+      });
+      return;
+    }
+
+    const targetUrl = decodeProxyUrl(encodedUrl);
+    const parsed = new URL(targetUrl);
+    if (!/^https?:$/i.test(parsed.protocol)) {
+      sendJson(response, 400, {
+        error: 'Unsupported preview asset protocol.'
+      });
+      return;
+    }
+
+    await proxyPreviewAsset(parsed.toString(), refererUrl, request, response);
+  }
+
   const requestHandler = async (request, response) => {
     try {
       const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
@@ -592,6 +837,16 @@ async function createApp() {
 
       if (request.method === 'GET' && url.pathname === '/api/library') {
         await handleLibrary(url, response);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/preview/play') {
+        await handlePreviewPlay(url, request, response);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/preview/asset') {
+        await handlePreviewAsset(url, request, response);
         return;
       }
 

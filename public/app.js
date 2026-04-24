@@ -12,10 +12,17 @@ const state = {
   messageTimer: null,
   mpegtsPlayer: null,
   mobileMenuOpen: false,
+  previewModalOpen: false,
+  refreshTimer: null,
+  renderCache: {
+    dashboardRanking: '',
+    favorites: ''
+  },
   selectedDownloadKeys: new Set(),
   settingsOpen: false,
   shortcutModalOpen: false,
   snapshot: null,
+  touchDevice: false,
   thumbnailModalOpen: false,
   tab: 'dashboard',
   viewerIndex: -1,
@@ -558,12 +565,67 @@ function buildPlaybackUrl(item) {
   return `https://tv.dmm.com/vod/playback/on-demand/?${params.toString()}`;
 }
 
+function buildPreviewUrl(item) {
+  const seasonId = item?.seasonId || '';
+  const contentId = item?.contentId || seasonId;
+  const params = new URLSearchParams({
+    season: seasonId,
+    content: contentId
+  });
+  return `/api/preview/play?${params.toString()}`;
+}
+
+function supportsInlinePreview() {
+  return Boolean(
+    state.touchDevice &&
+      elements.previewPlayer &&
+      typeof elements.previewPlayer.canPlayType === 'function' &&
+      elements.previewPlayer.canPlayType('application/vnd.apple.mpegurl')
+  );
+}
+
+function rankingSectionSignature(options) {
+  const items = options.items || [];
+  return JSON.stringify({
+    allowDownloadSelection: Boolean(options.allowDownloadSelection),
+    downloadSelectionMode: state.downloadSelectionMode,
+    emptyText: options.emptyText,
+    eyebrow: options.eyebrow,
+    statusText: options.statusText,
+    title: options.title,
+    items: items.map((item) => {
+      const downloadKey = getDownloadKey(item);
+      return {
+        actress: item.actress || '',
+        favorite: isFavorite(item),
+        key: getItemKey(item),
+        playbackUrl: item.playbackUrl || buildPlaybackUrl(item),
+        rank: item.rank ?? '',
+        seasonId: item.seasonId || '',
+        selectedForDownload: state.selectedDownloadKeys.has(downloadKey),
+        thumbnailUrl: item.thumbnailUrl || '',
+        title: item.title || ''
+      };
+    })
+  });
+}
+
 function renderRankingSection(container, options) {
   if (!container) {
     return;
   }
 
   const items = options.items || [];
+  const cacheKey = options.cacheKey;
+  const signature = rankingSectionSignature(options);
+  if (cacheKey && state.renderCache[cacheKey] === signature) {
+    return;
+  }
+
+  if (cacheKey) {
+    state.renderCache[cacheKey] = signature;
+  }
+
   container.innerHTML = `
     <div class="ranking-header">
       <div>
@@ -597,7 +659,7 @@ function renderRankingSection(container, options) {
                   : `<span class="ranking-card-rank">${item.rank}</span>`;
                 const thumbnail = item.thumbnailUrl
                   ? `<a class="ranking-card-image-link" href="${escapeHtml(playbackUrl)}" target="_blank" rel="noreferrer">
-                      <img class="ranking-card-image" src="${escapeHtml(item.thumbnailUrl)}" alt="${escapeHtml(item.title)}" loading="lazy" />
+                      <img class="ranking-card-image" src="${escapeHtml(item.thumbnailUrl)}" alt="${escapeHtml(item.title)}" decoding="async" />
                     </a>`
                   : `<a class="ranking-card-image-link ranking-card-image-empty" href="${escapeHtml(playbackUrl)}" target="_blank" rel="noreferrer">No Image</a>`;
 
@@ -629,9 +691,9 @@ function renderRankingSection(container, options) {
                           >
                             サムネイル
                           </button>
-                          <a class="watch-button" href="${escapeHtml(playbackUrl)}" target="_blank" rel="noreferrer" aria-label="${escapeHtml(item.title || '動画')}を再生" title="再生">
+                          <button class="watch-button" type="button" data-preview-key="${escapeHtml(key)}" title="再生">
                             <span aria-hidden="true">▶</span>
-                          </a>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -682,6 +744,23 @@ function bindRankingCardActions(container, items) {
       }
     });
   });
+
+  container.querySelectorAll('[data-preview-key]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.previewKey;
+      const item = itemMap.get(key) || state.favorites[key];
+      if (!item) {
+        return;
+      }
+
+      if (!supportsInlinePreview()) {
+        window.open(item.playbackUrl || buildPlaybackUrl(item), '_blank', 'noopener,noreferrer');
+        return;
+      }
+
+      openPreviewModal(item);
+    });
+  });
 }
 
 function renderDashboardRanking() {
@@ -689,6 +768,7 @@ function renderDashboardRanking() {
 
   renderRankingSection(elements.dashboardRanking, {
     allowDownloadSelection: true,
+    cacheKey: 'dashboardRanking',
     emptyText: 'ランキングデータはまだありません。',
     eyebrow: '最新ランキング',
     items: rankingItems,
@@ -705,6 +785,7 @@ function renderFavorites() {
   });
 
   renderRankingSection(elements.favoritesContent, {
+    cacheKey: 'favorites',
     emptyText: 'お気に入りはまだありません。星を押すとここに保存されます。',
     eyebrow: 'お気に入り',
     items: favoriteItems,
@@ -731,6 +812,42 @@ function closeThumbnailModal() {
   elements.thumbnailModalImage.removeAttribute('src');
   elements.thumbnailModalImage.alt = '';
   elements.thumbnailModalTitle.textContent = '';
+}
+
+function stopPreviewPlayback() {
+  if (!elements.previewPlayer) {
+    return;
+  }
+
+  elements.previewPlayer.pause();
+  elements.previewPlayer.removeAttribute('src');
+  elements.previewPlayer.load();
+  elements.previewModalTitle.textContent = '';
+  elements.previewModalMeta.textContent = '';
+}
+
+function setPreviewModalOpen(isOpen) {
+  state.previewModalOpen = isOpen;
+  elements.previewModal.hidden = !isOpen;
+  document.body.classList.toggle('preview-modal-open', isOpen);
+}
+
+function openPreviewModal(item) {
+  const label = [item.title, item.actress].filter(Boolean).join(' / ');
+  const previewUrl = buildPreviewUrl(item);
+
+  stopPreviewPlayback();
+  elements.previewModalTitle.textContent = label || '動画プレビュー';
+  elements.previewModalMeta.textContent = '最大品質で読み込み中';
+  elements.previewPlayer.src = previewUrl;
+  elements.previewPlayer.load();
+  setPreviewModalOpen(true);
+  elements.previewPlayer.play().catch(() => {});
+}
+
+function closePreviewModal() {
+  setPreviewModalOpen(false);
+  stopPreviewPlayback();
 }
 
 function setShortcutModalOpen(isOpen) {
@@ -1002,6 +1119,7 @@ async function refreshState() {
     elements.viewerDirectoryInput.value = state.snapshot.settings.libraryDirectory;
   }
   elements.viewerAutoplayToggle.checked = Boolean(state.snapshot.settings.autoplayNext);
+  scheduleAutoRefresh();
 }
 
 async function saveSettings(options = {}) {
@@ -1224,7 +1342,13 @@ function moveViewerSelection(step) {
 }
 
 function handleViewerShortcuts(event) {
-  if (state.tab !== 'viewer' || state.settingsOpen || state.thumbnailModalOpen || state.shortcutModalOpen) {
+  if (
+    state.tab !== 'viewer' ||
+    state.settingsOpen ||
+    state.thumbnailModalOpen ||
+    state.previewModalOpen ||
+    state.shortcutModalOpen
+  ) {
     return;
   }
 
@@ -1285,6 +1409,49 @@ function loadLocalFiles(fileList) {
   }
 }
 
+function shouldRefreshHistory() {
+  return state.tab === 'history' || Boolean(state.snapshot?.downloads?.running);
+}
+
+function autoRefreshDelay() {
+  if (document.visibilityState === 'hidden') {
+    return 45000;
+  }
+
+  if (state.previewModalOpen) {
+    return 30000;
+  }
+
+  if (state.snapshot?.downloads?.running || state.controlsDirty) {
+    return 4000;
+  }
+
+  if (state.tab === 'viewer' && state.viewerMode === 'server') {
+    return 6000;
+  }
+
+  return 20000;
+}
+
+function scheduleAutoRefresh(delay = autoRefreshDelay()) {
+  window.clearTimeout(state.refreshTimer);
+  state.refreshTimer = window.setTimeout(async () => {
+    try {
+      await refreshState();
+      if (shouldRefreshHistory()) {
+        await refreshHistory();
+      }
+      if (state.tab === 'viewer' && state.viewerMode === 'server') {
+        await refreshLibrary({ silent: true });
+      }
+    } catch {
+      return;
+    } finally {
+      scheduleAutoRefresh();
+    }
+  }, delay);
+}
+
 function bindStaticEvents() {
   document.querySelectorAll('.nav-button').forEach((button) => {
     button.addEventListener('click', () => switchTab(button.dataset.tab));
@@ -1292,6 +1459,8 @@ function bindStaticEvents() {
 
   elements.thumbnailModalBackdrop.addEventListener('click', closeThumbnailModal);
   elements.thumbnailModalCloseButton.addEventListener('click', closeThumbnailModal);
+  elements.previewModalBackdrop.addEventListener('click', closePreviewModal);
+  elements.previewModalCloseButton.addEventListener('click', closePreviewModal);
   elements.shortcutHelpButton.addEventListener('click', openShortcutModal);
   elements.shortcutModalBackdrop.addEventListener('click', closeShortcutModal);
   elements.shortcutModalCloseButton.addEventListener('click', closeShortcutModal);
@@ -1316,6 +1485,11 @@ function bindStaticEvents() {
 
     if (event.key === 'Escape' && state.thumbnailModalOpen) {
       closeThumbnailModal();
+      return;
+    }
+
+    if (event.key === 'Escape' && state.previewModalOpen) {
+      closePreviewModal();
       return;
     }
 
@@ -1384,8 +1558,21 @@ function bindStaticEvents() {
   });
 
   elements.viewerPlayer.addEventListener('ratechange', updateRateDisplay);
+  elements.previewPlayer.addEventListener('loadedmetadata', () => {
+    elements.previewModalMeta.textContent = '最大品質プレビュー';
+  });
+  elements.previewPlayer.addEventListener('error', () => {
+    elements.previewModalMeta.textContent = '読み込みに失敗しました';
+    showMessage('プレビューを再生できませんでした。必要ならDMM再生へ切り替えてください。', 'error');
+  });
   document.addEventListener('keydown', handleViewerShortcuts, true);
-  elements.mobileActionMedia.addEventListener('change', syncResponsiveActionPlacement);
+  elements.mobileActionMedia.addEventListener('change', () => {
+    state.touchDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+    syncResponsiveActionPlacement();
+  });
+  document.addEventListener('visibilitychange', () => {
+    scheduleAutoRefresh(document.visibilityState === 'visible' ? 1000 : autoRefreshDelay());
+  });
   syncResponsiveActionPlacement();
 }
 
@@ -1411,6 +1598,12 @@ async function boot() {
   elements.shortcutModal = qs('shortcut-modal');
   elements.shortcutModalBackdrop = qs('shortcut-modal-backdrop');
   elements.shortcutModalCloseButton = qs('shortcut-modal-close-button');
+  elements.previewModal = qs('preview-modal');
+  elements.previewModalBackdrop = qs('preview-modal-backdrop');
+  elements.previewModalCloseButton = qs('preview-modal-close-button');
+  elements.previewModalMeta = qs('preview-modal-meta');
+  elements.previewModalTitle = qs('preview-modal-title');
+  elements.previewPlayer = qs('preview-player');
   elements.thumbnailModal = qs('thumbnail-modal');
   elements.thumbnailModalBackdrop = qs('thumbnail-modal-backdrop');
   elements.thumbnailModalCloseButton = qs('thumbnail-modal-close-button');
@@ -1431,24 +1624,14 @@ async function boot() {
   elements.warningList = qs('warning-list');
 
   state.favorites = loadFavorites();
+  state.touchDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
   bindStaticEvents();
   switchTab('dashboard');
 
   await refreshState();
   await refreshHistory();
   await refreshLibrary({ silent: true });
-
-  window.setInterval(async () => {
-    try {
-      await refreshState();
-      await refreshHistory();
-      if (state.tab === 'viewer' && state.viewerMode === 'server') {
-        await refreshLibrary({ silent: true });
-      }
-    } catch {
-      return;
-    }
-  }, 4000);
+  scheduleAutoRefresh();
 }
 
 boot().catch((error) => {
