@@ -1089,6 +1089,7 @@ tbody tr:hover {
 }
 
 .ranking-card-actress {
+  flex: 1 1 auto;
   min-width: 0;
   color: var(--text-soft);
   overflow: hidden;
@@ -1097,9 +1098,10 @@ tbody tr:hover {
 }
 
 .ranking-card-subrow {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
+  justify-content: stretch;
   gap: 8px;
   min-width: 0;
 }
@@ -1109,6 +1111,8 @@ tbody tr:hover {
   flex: 0 0 auto;
   align-items: center;
   gap: 4px;
+  min-width: max-content;
+  margin-left: auto;
 }
 
 .thumbnail-button,
@@ -1868,20 +1872,30 @@ tbody tr:hover {
     font-size: 11px;
   }
 
-  .ranking-card-actions {
+  .ranking-card-subrow {
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 6px;
+  }
+
+  .ranking-card-actions {
+    gap: 4px;
   }
 
   .thumbnail-button,
   .watch-button {
-    min-height: 30px;
-    font-size: 0.76rem;
+    min-height: 28px;
+    font-size: 0.72rem;
   }
 
   .thumbnail-button {
-    max-width: 88px;
+    max-width: 76px;
+    padding: 0 6px;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .watch-button {
+    width: 28px;
   }
 }
 
