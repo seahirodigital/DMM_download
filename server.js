@@ -257,6 +257,9 @@ async function createApp() {
   const publicDir = path.join(process.cwd(), 'public');
   const rankingHistoryCsv = path.join(process.cwd(), 'data', 'history', 'ranking-history.csv');
   const previewSourceCache = new Map();
+  const initialRankingCount = Math.max(1, Number(config.ranking.first || 15));
+  const initialRankingMaxAgeMs = 10 * 60 * 1000;
+  let latestRankingSyncPromise = null;
 
   function buildSnapshot() {
     const warnings = [];
@@ -277,6 +280,63 @@ async function createApp() {
       settings: stateStore.getSettings(),
       warnings
     };
+  }
+
+  function shouldRefreshInitialRanking(options = {}) {
+    const ranking = stateStore.getRanking();
+    const items = Array.isArray(ranking?.items) ? ranking.items : [];
+    if (!items.length) {
+      return true;
+    }
+
+    if (options.enforceCount && items.length !== initialRankingCount) {
+      return true;
+    }
+
+    const expectedSourcePageUrl = stateStore.getSettings().rankingSourceUrl || config.ranking.sourcePageUrl;
+    if ((ranking?.sourcePageUrl || '') !== expectedSourcePageUrl) {
+      return true;
+    }
+
+    const fetchedAtMs = Date.parse(ranking?.fetchedAt || '');
+    if (!Number.isFinite(fetchedAtMs)) {
+      return true;
+    }
+
+    return Date.now() - fetchedAtMs > initialRankingMaxAgeMs;
+  }
+
+  async function loadLatestRanking(options = {}) {
+    const currentSettings = stateStore.getSettings();
+    const ranking = await fetchRanking(config, {
+      first: Number.isFinite(Number(options.first)) ? Math.max(1, Number(options.first)) : initialRankingCount,
+      sourcePageUrl: options.sourcePageUrl || currentSettings.rankingSourceUrl
+    });
+    await stateStore.setRanking(ranking);
+    if (!hosted) {
+      await appendCsvRows(
+        rankingHistoryCsv,
+        ['fetchedAt', 'rank', 'seasonId', 'title', 'actress', 'detailUrl', 'thumbnailUrl', 'searchUrl', 'sourcePageUrl'],
+        buildHistoryCsvRows(ranking)
+      );
+    }
+    return ranking;
+  }
+
+  async function ensureInitialRankingLoaded(options = {}) {
+    if (!shouldRefreshInitialRanking(options)) {
+      return stateStore.getRanking();
+    }
+
+    if (!latestRankingSyncPromise) {
+      latestRankingSyncPromise = loadLatestRanking({
+        first: options.enforceCount ? initialRankingCount : undefined
+      }).finally(() => {
+        latestRankingSyncPromise = null;
+      });
+    }
+
+    return latestRankingSyncPromise;
   }
 
   function buildPreviewHeaders(refererUrl) {
@@ -423,26 +483,25 @@ async function createApp() {
     response.end();
   }
 
-  async function handleState(response) {
+  async function handleState(url, response) {
+    if (url.searchParams.get('initial') === '1') {
+      try {
+        await ensureInitialRankingLoaded({
+          enforceCount: true
+        });
+      } catch (error) {
+        console.error('Failed to auto-load initial ranking:', error);
+      }
+    }
     sendJson(response, 200, buildSnapshot());
   }
 
   async function handleFetchRanking(request, response) {
     const body = await readRequestBody(request);
-    const requestedFirst = Number(body.first);
-    const currentSettings = stateStore.getSettings();
-    const ranking = await fetchRanking(config, {
-      first: Number.isFinite(requestedFirst) ? Math.max(1, requestedFirst) : config.ranking.first,
-      sourcePageUrl: body.sourcePageUrl || currentSettings.rankingSourceUrl
+    const ranking = await loadLatestRanking({
+      first: body.first,
+      sourcePageUrl: body.sourcePageUrl
     });
-    await stateStore.setRanking(ranking);
-    if (!hosted) {
-      await appendCsvRows(
-        rankingHistoryCsv,
-        ['fetchedAt', 'rank', 'seasonId', 'title', 'actress', 'detailUrl', 'thumbnailUrl', 'searchUrl', 'sourcePageUrl'],
-        buildHistoryCsvRows(ranking)
-      );
-    }
 
     sendJson(response, 200, {
       ok: true,
@@ -801,7 +860,7 @@ async function createApp() {
       const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
 
       if (request.method === 'GET' && url.pathname === '/api/state') {
-        await handleState(response);
+        await handleState(url, response);
         return;
       }
 

@@ -1711,7 +1711,7 @@ tbody tr:hover {
   }
 }
 
-@media (max-width: 1180px) and (orientation: landscape), (hover: none) and (pointer: coarse) and (orientation: landscape) {
+@media (max-width: 999px) and (orientation: landscape), (hover: none) and (pointer: coarse) and (orientation: landscape) and (max-width: 999px) {
   html,
   body,
   .app-shell {
@@ -1752,16 +1752,16 @@ tbody tr:hover {
 
   .ranking-grid {
     display: grid;
-    grid-auto-columns: clamp(160px, calc((100vw - 96px) / 5), 210px);
+    grid-auto-columns: clamp(136px, calc((100% - 38px) / 4), 188px);
     grid-auto-flow: column;
     grid-template-columns: none !important;
-    gap: 14px;
+    gap: 12px;
     height: 100%;
     min-height: 0;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 2px 18px 16px 4px;
-    scroll-padding-inline: 18px;
+    padding: 2px 16px 14px 4px;
+    scroll-padding-inline: 16px;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
@@ -1781,7 +1781,7 @@ tbody tr:hover {
 
   .ranking-card-title,
   .ranking-card-actress {
-    font-size: 11px;
+    font-size: 10px;
   }
 
   .ranking-card-actions {
@@ -1790,12 +1790,12 @@ tbody tr:hover {
 
   .thumbnail-button,
   .watch-button {
-    min-height: 30px;
-    font-size: 0.76rem;
+    min-height: 28px;
+    font-size: 0.72rem;
   }
 
   .thumbnail-button {
-    max-width: 88px;
+    max-width: 78px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -1807,11 +1807,11 @@ tbody tr:hover {
   }
 }
 
-@media (hover: none) and (pointer: coarse) and (orientation: landscape) and (min-width: 1000px) {
+@media (orientation: landscape) and (min-width: 1000px) and (max-width: 1400px) and (hover: none), (orientation: landscape) and (min-width: 1000px) and (max-width: 1400px) and (pointer: coarse) {
   .content {
     height: 100vh;
     overflow: hidden;
-    padding: 12px 14px;
+    padding: 12px 16px;
   }
 
   #dashboard-view.active,
@@ -1832,14 +1832,32 @@ tbody tr:hover {
   }
 
   .ranking-grid {
-    grid-auto-columns: minmax(0, calc((100vw - 148px) / 5));
-    gap: 16px;
+    display: grid;
+    grid-auto-columns: clamp(176px, calc((100% - 64px) / 5), 214px);
+    grid-auto-flow: column;
+    grid-template-columns: none !important;
+    gap: 14px;
     height: 100%;
-    padding: 4px 22px 18px 4px;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 4px 16px 18px 4px;
+    scroll-padding-inline: 16px;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
   }
 
   .ranking-card {
     min-width: 0;
+    gap: 8px;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+
+  .ranking-card-image-link {
+    border-radius: 12px;
   }
 
   .ranking-card-title {
@@ -1848,6 +1866,22 @@ tbody tr:hover {
 
   .ranking-card-actress {
     font-size: 11px;
+  }
+
+  .ranking-card-actions {
+    gap: 6px;
+  }
+
+  .thumbnail-button,
+  .watch-button {
+    min-height: 30px;
+    font-size: 0.76rem;
+  }
+
+  .thumbnail-button {
+    max-width: 88px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 

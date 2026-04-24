@@ -1097,8 +1097,9 @@ async function refreshHistory() {
   renderDashboardRanking();
 }
 
-async function refreshState() {
-  state.snapshot = await requestJson('/api/state');
+async function refreshState(options = {}) {
+  const stateUrl = options.initial ? '/api/state?initial=1' : '/api/state';
+  state.snapshot = await requestJson(stateUrl);
   syncFavoritesWithRanking();
   pruneDownloadSelection();
   renderWarnings();
@@ -1628,7 +1629,7 @@ async function boot() {
   bindStaticEvents();
   switchTab('dashboard');
 
-  await refreshState();
+  await refreshState({ initial: true });
   await refreshHistory();
   await refreshLibrary({ silent: true });
   scheduleAutoRefresh();
