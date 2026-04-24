@@ -1070,9 +1070,11 @@ tbody tr:hover {
 }
 
 .ranking-card-meta {
-  display: grid;
-  gap: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-height: 0;
+  min-width: 0;
 }
 
 .ranking-card-title,
@@ -1098,12 +1100,13 @@ tbody tr:hover {
 }
 
 .ranking-card-subrow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  justify-content: stretch;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
   gap: 8px;
   min-width: 0;
+  width: 100%;
 }
 
 .ranking-card-actions {
@@ -1111,8 +1114,9 @@ tbody tr:hover {
   flex: 0 0 auto;
   align-items: center;
   gap: 4px;
-  min-width: max-content;
   margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .thumbnail-button,
@@ -1837,16 +1841,16 @@ tbody tr:hover {
 
   .ranking-grid {
     display: grid;
-    grid-auto-columns: clamp(176px, calc((100% - 64px) / 5), 214px);
+    grid-auto-columns: clamp(182px, calc((100% - 48px) / 5), 226px);
     grid-auto-flow: column;
     grid-template-columns: none !important;
-    gap: 14px;
+    gap: 12px;
     height: 100%;
     min-height: 0;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 4px 16px 18px 4px;
-    scroll-padding-inline: 16px;
+    padding: 4px 12px 18px 4px;
+    scroll-padding-inline: 12px;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
@@ -1873,7 +1877,6 @@ tbody tr:hover {
   }
 
   .ranking-card-subrow {
-    grid-template-columns: minmax(0, 1fr) auto;
     gap: 6px;
   }
 
@@ -1883,19 +1886,19 @@ tbody tr:hover {
 
   .thumbnail-button,
   .watch-button {
-    min-height: 28px;
-    font-size: 0.72rem;
+    min-height: 26px;
+    font-size: 0.7rem;
   }
 
   .thumbnail-button {
-    max-width: 76px;
-    padding: 0 6px;
+    max-width: 72px;
+    padding: 0 5px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .watch-button {
-    width: 28px;
+    width: 26px;
   }
 }
 
