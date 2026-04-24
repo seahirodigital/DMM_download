@@ -833,6 +833,18 @@ async function createApp() {
     response.end(rewrittenPlaylist);
   }
 
+  async function handlePreviewInfo(url, response) {
+    const item = buildPreviewItem(url);
+    const source = await resolvePreviewSource(item);
+    sendJson(response, 200, {
+      playbackUrl: `/api/preview/play?${new URLSearchParams({
+        content: item.contentId || item.seasonId,
+        season: item.seasonId
+      }).toString()}`,
+      type: source.type || 'direct'
+    });
+  }
+
   async function handlePreviewAsset(url, request, response) {
     const encodedUrl = url.searchParams.get('url');
     const refererUrl = url.searchParams.get('referer') || config.ranking.referer;
@@ -901,6 +913,11 @@ async function createApp() {
 
       if (request.method === 'GET' && url.pathname === '/api/preview/play') {
         await handlePreviewPlay(url, request, response);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/preview/info') {
+        await handlePreviewInfo(url, response);
         return;
       }
 
