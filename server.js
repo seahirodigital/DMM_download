@@ -976,7 +976,7 @@ async function createApp() {
     const source = await resolvePreviewSource(item, { forceRefresh });
     const refererUrl = source.detailUrl || item.detailUrl || config.ranking.referer;
 
-    if (hosted && source.type !== 'hls') {
+    if (hosted) {
       response.writeHead(302, {
         'Cache-Control': 'no-store',
         Location: source.url
@@ -1017,7 +1017,7 @@ async function createApp() {
     }).toString()}`;
 
     sendJson(response, 200, {
-      playbackUrl: hosted && source.type !== 'hls' ? source.url : proxiedPlaybackUrl,
+      playbackUrl: hosted ? source.url : proxiedPlaybackUrl,
       type: source.type || 'direct'
     });
   }
