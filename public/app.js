@@ -980,6 +980,71 @@ function buildPreviewCacheKey(item) {
   return `${item?.seasonId || ''}:${item?.contentId || item?.seasonId || item?.playbackUrl || item?.detailUrl || ''}`;
 }
 
+function parseHlsAttributeList(line) {
+  const attributes = {};
+  const text = line.includes(':') ? line.slice(line.indexOf(':') + 1) : line;
+  const pattern = /([A-Z0-9-]+)=("[^"]*"|[^,]*)/gi;
+
+  for (const match of text.matchAll(pattern)) {
+    attributes[match[1]] = match[2].replace(/^"|"$/g, '');
+  }
+
+  return attributes;
+}
+
+function selectHighestHlsVariantUrl(manifestUrl, manifestText) {
+  const lines = String(manifestText || '').split(/\r?\n/).map((line) => line.trim());
+  const variants = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.startsWith('#EXT-X-STREAM-INF')) {
+      continue;
+    }
+
+    const attributes = parseHlsAttributeList(line);
+    const nextLine = lines[index + 1];
+    if (!nextLine || nextLine.startsWith('#')) {
+      continue;
+    }
+
+    const resolution = String(attributes.RESOLUTION || '').split('x').map((value) => Number(value) || 0);
+    variants.push({
+      bandwidth: Number(attributes.BANDWIDTH || attributes['AVERAGE-BANDWIDTH'] || 0),
+      pixels: (resolution[0] || 0) * (resolution[1] || 0),
+      url: new URL(nextLine, manifestUrl).toString()
+    });
+  }
+
+  if (!variants.length) {
+    return '';
+  }
+
+  variants.sort((left, right) => right.pixels - left.pixels || right.bandwidth - left.bandwidth);
+  return variants[0].url;
+}
+
+async function preferHighestHlsVariant(info) {
+  if (!isHostedMode() || info?.type !== 'hls' || !/^https?:\/\//i.test(info.playbackUrl || '')) {
+    return info;
+  }
+
+  try {
+    const response = await fetch(info.playbackUrl, {
+      cache: 'no-store',
+      mode: 'cors'
+    });
+    if (!response.ok) {
+      return info;
+    }
+
+    const variantUrl = selectHighestHlsVariantUrl(info.playbackUrl, await response.text());
+    return variantUrl ? { ...info, playbackUrl: variantUrl } : info;
+  } catch {
+    return info;
+  }
+}
+
 function nextPreviewSourceToken() {
   previewSourceTokenCounter += 1;
   return `${Date.now()}-${previewSourceTokenCounter}`;
@@ -1236,6 +1301,7 @@ async function attachPreviewSource(video, item, options = {}) {
   let info;
   try {
     info = await getPreviewInfo(item, { cacheBust, forceRefresh });
+    info = await preferHighestHlsVariant(info);
   } catch (error) {
     if (retryCount <= 0 || !shouldContinue()) {
       throw error;
@@ -1349,6 +1415,8 @@ async function attachPreviewSource(video, item, options = {}) {
   };
 
   video.addEventListener('loadedmetadata', handleReady, { once: true });
+  video.addEventListener('loadeddata', handleReady, { once: true });
+  video.addEventListener('canplay', handleReady, { once: true });
   video.addEventListener(
     'error',
     () => {
@@ -1379,7 +1447,7 @@ async function attachPreviewSource(video, item, options = {}) {
         hls.loadSource(info.playbackUrl);
       }
     });
-    hls.on(window.Hls.Events.MANIFEST_PARSED, handleReady);
+    hls.on(window.Hls.Events.FRAG_BUFFERED, handleReady);
     hls.on(window.Hls.Events.ERROR, (_event, data) => {
       if (data?.fatal && isCurrentSource()) {
         retryWithFreshSource(new Error('HLS プレビューの再生に失敗しました。'));
