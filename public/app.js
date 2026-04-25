@@ -1185,8 +1185,9 @@ function applyInlinePreviewAudioFocus() {
       return;
     }
 
-    video.muted = !isActive;
-    video.defaultMuted = !isActive;
+    const canEnableAudio = isActive && !video.paused && !video.ended && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+    video.muted = !canEnableAudio;
+    video.defaultMuted = !canEnableAudio;
   });
 }
 
@@ -1316,17 +1317,35 @@ async function attachPreviewSource(video, item, options = {}) {
     });
   }
 
+  let readyHandled = false;
   const handleReady = () => {
+    if (readyHandled) {
+      return;
+    }
+
     if (!isCurrentSource()) {
       return;
     }
 
-    onReady?.(info);
+    readyHandled = true;
     if (autoplay) {
-      video.play().catch((error) => {
-        onAutoplayBlocked?.(error);
-      });
+      video.muted = true;
+      video.defaultMuted = true;
+      video
+        .play()
+        .then(() => {
+          if (isCurrentSource()) {
+            onReady?.(info);
+            applyInlinePreviewAudioFocus();
+          }
+        })
+        .catch((error) => {
+          onAutoplayBlocked?.(error);
+        });
+      return;
     }
+
+    onReady?.(info);
   };
 
   video.addEventListener('loadedmetadata', handleReady, { once: true });
@@ -1355,12 +1374,17 @@ async function attachPreviewSource(video, item, options = {}) {
       enableWorker: true
     });
 
+    hls.on(window.Hls.Events.MEDIA_ATTACHED, () => {
+      if (isCurrentSource()) {
+        hls.loadSource(info.playbackUrl);
+      }
+    });
+    hls.on(window.Hls.Events.MANIFEST_PARSED, handleReady);
     hls.on(window.Hls.Events.ERROR, (_event, data) => {
       if (data?.fatal && isCurrentSource()) {
         retryWithFreshSource(new Error('HLS プレビューの再生に失敗しました。'));
       }
     });
-    hls.loadSource(info.playbackUrl);
     hls.attachMedia(video);
 
     if (activeStore && playerKey) {

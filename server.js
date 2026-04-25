@@ -487,6 +487,10 @@ async function createApp() {
   }
 
   function buildPreviewAssetUrl(request, assetUrl, refererUrl, previewSession = '') {
+    if (hosted) {
+      return assetUrl;
+    }
+
     const proxyUrl = new URL('/api/preview/asset', `http://${request.headers.host || '127.0.0.1'}`);
     proxyUrl.searchParams.set('url', encodeProxyUrl(assetUrl));
     proxyUrl.searchParams.set('referer', refererUrl || config.ranking.referer);
@@ -972,7 +976,7 @@ async function createApp() {
     const source = await resolvePreviewSource(item, { forceRefresh });
     const refererUrl = source.detailUrl || item.detailUrl || config.ranking.referer;
 
-    if (hosted) {
+    if (hosted && source.type !== 'hls') {
       response.writeHead(302, {
         'Cache-Control': 'no-store',
         Location: source.url
@@ -1013,7 +1017,7 @@ async function createApp() {
     }).toString()}`;
 
     sendJson(response, 200, {
-      playbackUrl: hosted ? source.url : proxiedPlaybackUrl,
+      playbackUrl: hosted && source.type !== 'hls' ? source.url : proxiedPlaybackUrl,
       type: source.type || 'direct'
     });
   }
