@@ -1,7 +1,13 @@
 node_modules/
 
+# Environment files
+.env
+.env.*
+!.env.example
+
 # Local config with credentials/cookies
 config/app-config.json
+config/*.local.json
 
 # Runtime data
 data/runtime/
@@ -12,5 +18,9 @@ data/history/
 *.err.log
 *.out.log
 start-error.log
+codex-inline-server*.log
 
 .vercel
+
+# Local technical notes that may describe site-specific extraction behavior
+docs/techreference.md

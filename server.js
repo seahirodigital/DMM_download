@@ -344,9 +344,15 @@ async function createApp() {
   }
 
   function buildPreviewHeaders(refererUrl) {
+    const referer = refererUrl || config.ranking.referer;
+    let origin = config.ranking.origin;
+    try {
+      origin = new URL(referer).origin;
+    } catch {}
+
     const headers = {
-      Origin: config.ranking.origin,
-      Referer: refererUrl || config.ranking.referer,
+      Origin: origin,
+      Referer: referer,
       'User-Agent': config.ranking.userAgent
     };
 
@@ -360,30 +366,79 @@ async function createApp() {
   function buildPreviewItem(url) {
     const seasonId = String(url.searchParams.get('season') || '').trim();
     const contentId = String(url.searchParams.get('content') || seasonId).trim();
-    if (!seasonId) {
-      throw new Error('Preview season parameter is required.');
+    const rawPlaybackUrl = String(url.searchParams.get('playback') || '').trim();
+    const rawDetailUrl = String(url.searchParams.get('detail') || '').trim();
+    let playbackUrl = '';
+    let detailUrl = '';
+
+    if (rawPlaybackUrl) {
+      const parsedPlaybackUrl = new URL(rawPlaybackUrl);
+      if (!/^https?:$/i.test(parsedPlaybackUrl.protocol)) {
+        throw new Error('Unsupported preview playback URL.');
+      }
+      playbackUrl = parsedPlaybackUrl.toString();
+    }
+
+    if (rawDetailUrl) {
+      const parsedDetailUrl = new URL(rawDetailUrl);
+      if (!/^https?:$/i.test(parsedDetailUrl.protocol)) {
+        throw new Error('Unsupported preview detail URL.');
+      }
+      detailUrl = parsedDetailUrl.toString();
+    }
+
+    if (!seasonId && !playbackUrl && !detailUrl) {
+      throw new Error('Preview season, playback, or detail parameter is required.');
     }
 
     const rankingItem = stateStore
       .getRanking()
-      ?.items?.find((item) => String(item.seasonId || '') === seasonId || String(item.contentId || '') === contentId);
+      ?.items?.find(
+        (item) =>
+          (seasonId && String(item.seasonId || '') === seasonId) ||
+          (contentId && String(item.contentId || '') === contentId)
+      );
 
     if (rankingItem) {
       return {
         ...rankingItem,
-        contentId: rankingItem.contentId || contentId || rankingItem.seasonId
+        contentId: rankingItem.contentId || contentId || rankingItem.seasonId,
+        detailUrl: detailUrl || rankingItem.detailUrl,
+        playbackUrl: playbackUrl || rankingItem.playbackUrl
       };
     }
 
+    const fallbackDetailUrl = seasonId
+      ? `https://tv.dmm.com/vod/detail/?season=${encodeURIComponent(seasonId)}`
+      : config.ranking.referer;
+
     return {
       contentId: contentId || seasonId,
-      detailUrl: `https://tv.dmm.com/vod/detail/?season=${encodeURIComponent(seasonId)}`,
+      detailUrl: detailUrl || fallbackDetailUrl,
+      playbackUrl,
       seasonId
     };
   }
 
+  function buildPreviewPlaybackParams(item) {
+    const params = new URLSearchParams();
+    if (item.seasonId) {
+      params.set('season', item.seasonId);
+    }
+    if (item.contentId || item.seasonId) {
+      params.set('content', item.contentId || item.seasonId);
+    }
+    if (item.playbackUrl && !item.seasonId) {
+      params.set('playback', item.playbackUrl);
+    }
+    if (item.detailUrl && !item.seasonId) {
+      params.set('detail', item.detailUrl);
+    }
+    return params;
+  }
+
   async function resolvePreviewSource(item) {
-    const cacheKey = `${item.seasonId}:${item.contentId || item.seasonId}`;
+    const cacheKey = `${item.seasonId || ''}:${item.contentId || item.seasonId || item.playbackUrl || item.detailUrl || ''}`;
     const cached = previewSourceCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.source;
@@ -448,6 +503,35 @@ async function createApp() {
       .join('\n');
   }
 
+  function inferPreviewContentType(targetUrl, remoteContentType) {
+    const normalizedContentType = String(remoteContentType || '').toLowerCase();
+    if (
+      normalizedContentType &&
+      normalizedContentType !== 'application/octet-stream' &&
+      normalizedContentType !== 'binary/octet-stream'
+    ) {
+      return remoteContentType;
+    }
+
+    try {
+      const parsed = new URL(targetUrl);
+      if (/\.m3u8(\?|$)/i.test(parsed.toString())) {
+        return 'application/vnd.apple.mpegurl';
+      }
+      if (/\.(mp4|m4v)(\?|$)/i.test(parsed.toString()) || /\/(?:litevideo|freepv|sample)\//i.test(parsed.pathname)) {
+        return 'video/mp4';
+      }
+      if (/\.webm(\?|$)/i.test(parsed.toString())) {
+        return 'video/webm';
+      }
+      if (/\.mov(\?|$)/i.test(parsed.toString())) {
+        return 'video/quicktime';
+      }
+    } catch {}
+
+    return remoteContentType || 'application/octet-stream';
+  }
+
   async function proxyPreviewAsset(targetUrl, refererUrl, request, response) {
     const headers = buildPreviewHeaders(refererUrl);
     if (request.headers.range) {
@@ -465,7 +549,7 @@ async function createApp() {
 
     const responseHeaders = {
       'Cache-Control': 'no-store',
-      'Content-Type': remoteResponse.headers.get('content-type') || 'application/octet-stream'
+      'Content-Type': inferPreviewContentType(targetUrl, remoteResponse.headers.get('content-type'))
     };
 
     for (const [headerName, headerValue] of [
@@ -854,10 +938,7 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const source = await resolvePreviewSource(item);
     sendJson(response, 200, {
-      playbackUrl: `/api/preview/play?${new URLSearchParams({
-        content: item.contentId || item.seasonId,
-        season: item.seasonId
-      }).toString()}`,
+      playbackUrl: `/api/preview/play?${buildPreviewPlaybackParams(item).toString()}`,
       type: source.type || 'direct'
     });
   }

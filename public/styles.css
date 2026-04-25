@@ -1303,6 +1303,14 @@ tbody tr:hover {
   background: transparent;
 }
 
+.preview-iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #000000;
+}
+
 .preview-modal-meta {
   margin: 0;
   color: var(--brand);
@@ -1421,12 +1429,39 @@ tbody tr:hover {
 
 .favorite-preview-card {
   display: grid;
+  position: relative;
   gap: 10px;
   min-width: 0;
   padding: 14px;
   border: 1px solid rgba(0, 117, 74, 0.12);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.92);
+}
+
+.favorite-preview-remove-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(15, 17, 16, 0.16);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 4px 12px rgba(15, 17, 16, 0.16);
+}
+
+.favorite-preview-remove-button:hover {
+  border-color: rgba(181, 54, 54, 0.36);
+  color: #9f2d2d;
 }
 
 .inline-preview-card-active-audio {

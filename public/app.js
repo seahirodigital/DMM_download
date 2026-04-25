@@ -2,6 +2,7 @@ const state = {
   activeDashboardPreviewKeys: [],
   activeFavoritePreviewKeys: [],
   activeInlinePreviewAudioKey: '',
+  activeSearchPreviewKeys: [],
   controlsDirty: false,
   dashboardPreviewPlayers: new Map(),
   downloadSelectionMode: false,
@@ -40,7 +41,10 @@ const state = {
   },
   selectedDownloadKeys: new Set(),
   selectedFavoriteKeys: new Set(),
+  selectedSearchKeys: new Set(),
   settingsOpen: false,
+  searchPreviewPlayers: new Map(),
+  searchSelectionMode: false,
   shortcutModalOpen: false,
   snapshot: null,
   touchDevice: false,
@@ -79,8 +83,28 @@ function currentRankingItems() {
   return state.snapshot?.ranking?.items || [];
 }
 
+function currentSearchItems() {
+  return state.search?.items || [];
+}
+
+function isSearchPreviewable(item) {
+  return Boolean(item?.seasonId || item?.playbackUrl);
+}
+
 function selectedRankingItems() {
   return currentRankingItems().filter((item) => state.selectedDownloadKeys.has(getDownloadKey(item)));
+}
+
+function getSelectionKey(item, selectionKind) {
+  if (selectionKind === 'download') {
+    return getDownloadKey(item);
+  }
+
+  if (selectionKind === 'favorite' || selectionKind === 'search') {
+    return getItemKey(item);
+  }
+
+  return '';
 }
 
 function favoriteItemsSorted() {
@@ -133,8 +157,22 @@ function pruneFavoriteSelection() {
   }
 }
 
+function pruneSearchSelection() {
+  const validKeys = new Set(currentSearchItems().filter(isSearchPreviewable).map(getItemKey).filter(Boolean));
+  for (const key of [...state.selectedSearchKeys]) {
+    if (!validKeys.has(key)) {
+      state.selectedSearchKeys.delete(key);
+    }
+  }
+}
+
 function pruneFavoritePreviewKeys() {
   state.activeFavoritePreviewKeys = state.activeFavoritePreviewKeys.filter((key) => state.favorites[key]);
+}
+
+function pruneSearchPreviewKeys() {
+  const validKeys = new Set(currentSearchItems().filter(isSearchPreviewable).map(getItemKey).filter(Boolean));
+  state.activeSearchPreviewKeys = state.activeSearchPreviewKeys.filter((key) => validKeys.has(key));
 }
 
 function setFavoriteSelectionMode(isEnabled) {
@@ -164,6 +202,37 @@ function toggleFavoriteSelection(key, isSelected = !state.selectedFavoriteKeys.h
 
   renderFavorites();
   syncFavoriteSelectionControls();
+}
+
+function setSearchSelectionMode(isEnabled) {
+  const nextValue = Boolean(isEnabled && isDesktopBrowserExperience());
+  state.searchSelectionMode = nextValue;
+  if (!nextValue) {
+    state.selectedSearchKeys.clear();
+  } else {
+    pruneSearchSelection();
+  }
+  renderSearchResults();
+  syncSearchSelectionControls();
+}
+
+function toggleSearchSelectionMode() {
+  setSearchSelectionMode(!state.searchSelectionMode);
+}
+
+function toggleSearchSelection(key, isSelected = !state.selectedSearchKeys.has(key)) {
+  if (!key || !currentSearchItems().some((item) => getItemKey(item) === key && isSearchPreviewable(item))) {
+    return;
+  }
+
+  if (isSelected) {
+    state.selectedSearchKeys.add(key);
+  } else {
+    state.selectedSearchKeys.delete(key);
+  }
+
+  renderSearchResults();
+  syncSearchSelectionControls();
 }
 
 function normalizeFavoriteItem(item) {
@@ -343,6 +412,16 @@ function syncFavoriteSelectionControls() {
   );
 }
 
+function syncSearchSelectionControls() {
+  syncSelectionControls(
+    elements.searchResults,
+    '[data-search-selection-toggle]',
+    '[data-search-selection-play]',
+    state.searchSelectionMode,
+    state.selectedSearchKeys.size
+  );
+}
+
 function setDownloadSelectionMode(isEnabled) {
   state.downloadSelectionMode = isEnabled;
   if (!isEnabled) {
@@ -433,6 +512,11 @@ function switchTab(tabName) {
   if (state.tab === 'dashboard' && tabName !== 'dashboard') {
     destroyDashboardPreviewPlayers();
     state.renderCache.dashboardRanking = '';
+  }
+
+  if (state.tab === 'search' && tabName !== 'search') {
+    destroySearchPreviewPlayers();
+    state.renderCache.searchResults = '';
   }
 
   state.tab = tabName;
@@ -742,28 +826,68 @@ function buildPlaybackUrl(item) {
   return `https://tv.dmm.com/vod/playback/on-demand/?${params.toString()}`;
 }
 
+function preferHighQualityPlaybackUrl(value) {
+  try {
+    const url = new URL(value);
+    if (!/\/litevideo\//i.test(url.pathname)) {
+      return url.toString();
+    }
+
+    if (/\/size=[^/]+/i.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/\/size=[^/]+/i, '/size=1920_1080');
+    } else {
+      url.pathname = url.pathname.replace(/\/?$/, '/size=1920_1080/');
+    }
+    return url.toString();
+  } catch {
+    return value || '';
+  }
+}
+
+function buildCardPlaybackUrl(item) {
+  return preferHighQualityPlaybackUrl(item?.playbackUrl) || item?.detailUrl || buildPlaybackUrl(item);
+}
+
 function buildPreviewUrl(item) {
   const seasonId = item?.seasonId || '';
   const contentId = item?.contentId || seasonId;
-  const params = new URLSearchParams({
-    season: seasonId,
-    content: contentId
-  });
+  const params = new URLSearchParams();
+  if (seasonId) {
+    params.set('season', seasonId);
+  }
+  if (contentId) {
+    params.set('content', contentId);
+  }
+  if (!seasonId && item?.playbackUrl) {
+    params.set('playback', item.playbackUrl);
+  }
+  if (!seasonId && item?.detailUrl) {
+    params.set('detail', item.detailUrl);
+  }
   return `/api/preview/play?${params.toString()}`;
 }
 
 function buildPreviewInfoUrl(item) {
   const seasonId = item?.seasonId || '';
   const contentId = item?.contentId || seasonId;
-  const params = new URLSearchParams({
-    season: seasonId,
-    content: contentId
-  });
+  const params = new URLSearchParams();
+  if (seasonId) {
+    params.set('season', seasonId);
+  }
+  if (contentId) {
+    params.set('content', contentId);
+  }
+  if (!seasonId && item?.playbackUrl) {
+    params.set('playback', item.playbackUrl);
+  }
+  if (!seasonId && item?.detailUrl) {
+    params.set('detail', item.detailUrl);
+  }
   return `/api/preview/info?${params.toString()}`;
 }
 
 function buildPreviewCacheKey(item) {
-  return `${item?.seasonId || ''}:${item?.contentId || item?.seasonId || ''}`;
+  return `${item?.seasonId || ''}:${item?.contentId || item?.seasonId || item?.playbackUrl || item?.detailUrl || ''}`;
 }
 
 function previewSupportsNativeHls(video) {
@@ -783,16 +907,7 @@ async function getPreviewInfo(item) {
     return Promise.resolve(cached);
   }
 
-  if (!item?.seasonId && item?.playbackUrl) {
-    const resolved = {
-      playbackUrl: item.playbackUrl,
-      type: 'direct'
-    };
-    previewInfoCache.set(cacheKey, resolved);
-    return resolved;
-  }
-
-  if (!item?.seasonId) {
+  if (!item?.seasonId && !item?.playbackUrl && !item?.detailUrl) {
     throw new Error('このコンテンツにはページ内プレビュー用の動画情報がありません。');
   }
 
@@ -817,12 +932,44 @@ function resetVideoElement(video) {
     return;
   }
 
+  video.parentElement?.querySelectorAll('[data-preview-iframe]').forEach((iframe) => {
+    iframe.remove();
+  });
+  video.hidden = false;
+  video.style.display = '';
+
   try {
     video.pause();
   } catch {}
 
   video.removeAttribute('src');
   video.load();
+}
+
+function attachPreviewIframe(video, info, options = {}) {
+  const { onReady } = options;
+  resetVideoElement(video);
+  video.hidden = true;
+  video.style.display = 'none';
+
+  const iframe = document.createElement('iframe');
+  iframe.className = `${video.className || ''} preview-iframe`.trim();
+  iframe.dataset.previewIframe = 'true';
+  iframe.allow = 'autoplay; fullscreen; picture-in-picture';
+  iframe.allowFullscreen = true;
+  iframe.referrerPolicy = 'strict-origin-when-cross-origin';
+  iframe.scrolling = 'no';
+  iframe.src = info.playbackUrl;
+  iframe.addEventListener(
+    'load',
+    () => {
+      onReady?.(info);
+    },
+    { once: true }
+  );
+
+  video.parentElement?.appendChild(iframe);
+  return info;
 }
 
 function destroyPreviewHlsPlayer() {
@@ -853,6 +1000,18 @@ function destroyDashboardPreviewPlayers() {
   state.dashboardPreviewPlayers.clear();
 
   elements.dashboardRanking?.querySelectorAll('[data-inline-preview-video]').forEach((video) => {
+    resetVideoElement(video);
+    delete video.dataset.previewBound;
+  });
+}
+
+function destroySearchPreviewPlayers() {
+  for (const player of state.searchPreviewPlayers.values()) {
+    player.destroy();
+  }
+  state.searchPreviewPlayers.clear();
+
+  elements.searchResults?.querySelectorAll('[data-inline-preview-video]').forEach((video) => {
     resetVideoElement(video);
     delete video.dataset.previewBound;
   });
@@ -940,6 +1099,12 @@ async function attachPreviewSource(video, item, options = {}) {
   video.muted = Boolean(muted);
   video.defaultMuted = Boolean(muted);
 
+  if (info.type === 'iframe') {
+    return attachPreviewIframe(video, info, {
+      onReady
+    });
+  }
+
   const handleReady = () => {
     onReady?.(info);
     if (autoplay) {
@@ -1014,12 +1179,15 @@ function rankingSectionSignature(options) {
     items: items.map((item) => {
       const key = getItemKey(item);
       const downloadKey = getDownloadKey(item);
-      const selectionKey = selectionKind === 'download' ? downloadKey : selectionKind === 'favorite' ? key : '';
+      const selectionKey = getSelectionKey(item, selectionKind);
       return {
         actress: item.actress || '',
         favorite: isFavorite(item),
         key,
-        playbackUrl: item.playbackUrl || item.detailUrl || buildPlaybackUrl(item),
+        playbackUrl: buildCardPlaybackUrl(item),
+        previewable: options.isPreviewable
+          ? Boolean(options.isPreviewable(item))
+          : Boolean(item.seasonId || item.playbackUrl || item.detailUrl),
         rank: item.rank ?? '',
         seasonId: item.seasonId || '',
         selectedForDownload: state.selectedDownloadKeys.has(downloadKey),
@@ -1069,13 +1237,17 @@ function renderRankingSection(container, options) {
             ${items
               .map((item) => {
                 const key = getItemKey(item);
-                const downloadKey = getDownloadKey(item);
-                const selectionKey =
-                  selectionKind === 'download' ? downloadKey : selectionKind === 'favorite' ? key : '';
-                const playbackUrl = item.playbackUrl || item.detailUrl || buildPlaybackUrl(item);
-                const hasPreview = Boolean(item.seasonId || item.playbackUrl);
+                const selectionKey = getSelectionKey(item, selectionKind);
+                const playbackUrl = buildCardPlaybackUrl(item);
+                const hasPreview = options.isPreviewable
+                  ? Boolean(options.isPreviewable(item))
+                  : Boolean(item.seasonId || item.playbackUrl || item.detailUrl);
                 const favorite = isFavorite(item);
-                const selectable = Boolean(selectionMode && selectionKey);
+                const selectable = Boolean(
+                  selectionMode &&
+                    selectionKey &&
+                    (!options.isSelectable || options.isSelectable(item))
+                );
                 const selectedForSelection = selectionKey ? selectedKeys.has(selectionKey) : false;
                 const selectionAttrs = selectable
                   ? `data-card-selection-kind="${escapeHtml(selectionKind)}" data-card-selection-key="${escapeHtml(selectionKey)}"`
@@ -1183,18 +1355,27 @@ function bindRankingCardActions(container, items, options = {}) {
       if (kind === 'favorite') {
         toggleFavoriteSelection(key, checkbox.checked);
       }
+      if (kind === 'search') {
+        toggleSearchSelection(key, checkbox.checked);
+      }
       checkbox.closest('.ranking-card-select')?.classList.toggle('active', checkbox.checked);
     });
   });
 
   container.querySelectorAll('[data-card-selection-key]').forEach((link) => {
     link.addEventListener('click', (event) => {
-      if (!options.selectionMode || link.dataset.cardSelectionKind !== 'favorite') {
+      const kind = link.dataset.cardSelectionKind;
+      if (!options.selectionMode || (kind !== 'favorite' && kind !== 'search')) {
         return;
       }
 
       event.preventDefault();
-      toggleFavoriteSelection(link.dataset.cardSelectionKey);
+      if (kind === 'favorite') {
+        toggleFavoriteSelection(link.dataset.cardSelectionKey);
+      }
+      if (kind === 'search') {
+        toggleSearchSelection(link.dataset.cardSelectionKey);
+      }
     });
   });
 
@@ -1238,8 +1419,13 @@ function bindRankingCardActions(container, items, options = {}) {
         return;
       }
 
+      if (options.previewMode === 'search-inline' && isDesktopBrowserExperience()) {
+        openSearchInlinePreviews([key]);
+        return;
+      }
+
       if (!supportsInlinePreview()) {
-        window.open(item.playbackUrl || item.detailUrl || buildPlaybackUrl(item), '_blank', 'noopener,noreferrer');
+        window.open(buildCardPlaybackUrl(item), '_blank', 'noopener,noreferrer');
         return;
       }
 
@@ -1326,6 +1512,7 @@ function renderDashboardRanking() {
       elements.dashboardRanking?.querySelector('[data-inline-preview-close="dashboard"]')?.addEventListener('click', () => {
         closeDashboardInlinePreviews();
       });
+      bindInlinePreviewRemoveControls(elements.dashboardRanking);
       if (allowInlinePlayback && activePreviewItems.length) {
         queueMicrotask(() => {
           mountDashboardInlinePreviews(activePreviewItems).catch((error) => {
@@ -1349,30 +1536,117 @@ function renderSearchResults() {
     return;
   }
 
+  if (!isDesktopBrowserExperience()) {
+    state.searchSelectionMode = false;
+    state.selectedSearchKeys.clear();
+    destroySearchPreviewPlayers();
+    state.activeSearchPreviewKeys = [];
+  }
+
+  pruneSearchSelection();
+  pruneSearchPreviewKeys();
+
   const search = state.search;
+  const searchItems = currentSearchItems();
+  const itemMap = new Map(searchItems.map((item) => [getItemKey(item), item]));
+  const activePreviewItems = state.activeSearchPreviewKeys.map((key) => itemMap.get(key)).filter(Boolean);
+  const showBrowserControls = isDesktopBrowserExperience();
+  const allowInlinePlayback = showBrowserControls && state.tab === 'search';
+  const selectedCount = state.selectedSearchKeys.size;
   const statusText = search.loading
     ? 'DMM検索を実行中です。'
     : search.error
       ? search.error
-      : search.items.length
-        ? `${search.items.length}件を表示中${search.total ? ` / 全${search.total}件` : ''}`
+      : searchItems.length
+        ? `${searchItems.length}件を表示中${search.total ? ` / 全${search.total}件` : ''}`
         : 'ヘッダーの検索フォームから女優名を入力してください。';
+  const headerAsideHtml = showBrowserControls
+    ? `
+        <div class="ranking-header-actions">
+          <button
+            type="button"
+            class="header-command-button ${state.searchSelectionMode ? 'active' : ''}"
+            data-search-selection-toggle
+            aria-pressed="${state.searchSelectionMode ? 'true' : 'false'}"
+          >
+            ${state.searchSelectionMode ? (selectedCount ? `選択中 ${selectedCount}` : '選択中') : '複数選択'}
+          </button>
+          <button
+            type="button"
+            class="icon-button favorite-header-play-button"
+            data-search-selection-play
+            title="選択した動画を同時再生"
+            aria-label="選択した動画を同時再生"
+            ${selectedCount ? '' : 'disabled'}
+          >
+            <span aria-hidden="true">&#9654;</span>
+          </button>
+          <p class="muted">${escapeHtml(statusText)}</p>
+        </div>
+      `
+    : `<p class="muted">${escapeHtml(statusText)}</p>`;
 
   renderRankingSection(elements.searchResults, {
     cacheKey: 'searchResults',
     emptyText: search.query ? '該当するコンテンツは見つかりませんでした。' : '検索キーワードを入力してください。',
     eyebrow: 'DMM検索',
+    footerHtml:
+      allowInlinePlayback && activePreviewItems.length
+        ? renderInlinePreviewSection(activePreviewItems, {
+            closeAction: 'search',
+            heading: '検索結果内で再生',
+            selectedCount,
+            selectionAction: 'search',
+            selectionMode: state.searchSelectionMode,
+            showFavoriteToggle: true
+          })
+        : '',
+    footerSignature: allowInlinePlayback ? activePreviewItems.map(getItemKey).join(',') : '',
+    headerAsideHtml,
     headerAsideSignature: JSON.stringify({
+      activePreviewCount: activePreviewItems.length,
       error: search.error,
       fetchedAt: search.fetchedAt,
       loading: search.loading,
       pagesFetched: search.pagesFetched,
       query: search.query,
+      selectedCount,
+      selectionMode: state.searchSelectionMode,
+      showBrowserControls,
       statusText,
       total: search.total
     }),
-    items: search.items,
-    previewMode: 'default',
+    isPreviewable: isSearchPreviewable,
+    isSelectable: isSearchPreviewable,
+    items: searchItems,
+    onAfterRender: () => {
+      elements.searchResults?.querySelectorAll('[data-search-selection-toggle]').forEach((button) => {
+        button.addEventListener('click', () => {
+          toggleSearchSelectionMode();
+        });
+      });
+      elements.searchResults?.querySelectorAll('[data-search-selection-play]').forEach((button) => {
+        button.addEventListener('click', () => {
+          openSearchInlinePreviews([...state.selectedSearchKeys]);
+        });
+      });
+      elements.searchResults?.querySelector('[data-inline-preview-close="search"]')?.addEventListener('click', () => {
+        closeSearchInlinePreviews();
+      });
+      bindInlinePreviewRemoveControls(elements.searchResults);
+      if (allowInlinePlayback && activePreviewItems.length) {
+        queueMicrotask(() => {
+          mountSearchInlinePreviews(activePreviewItems).catch((error) => {
+            showMessage(error.message, 'error');
+          });
+        });
+      }
+    },
+    onBeforeRender: allowInlinePlayback ? destroySearchPreviewPlayers : undefined,
+    previewMode: allowInlinePlayback ? 'search-inline' : 'default',
+    selectionKind: showBrowserControls ? 'search' : '',
+    selectionMode: showBrowserControls && state.searchSelectionMode,
+    selectedKeys: state.selectedSearchKeys,
     statusText,
     title: search.query ? `${search.query} のコンテンツ` : '女優名検索'
   });
@@ -1388,6 +1662,10 @@ function renderInlinePreviewSelectionControls(options = {}) {
     favorites: {
       play: 'data-favorite-selection-play',
       toggle: 'data-favorite-selection-toggle'
+    },
+    search: {
+      play: 'data-search-selection-play',
+      toggle: 'data-search-selection-toggle'
     }
   }[selectionAction];
 
@@ -1453,6 +1731,16 @@ function renderInlinePreviewSection(items, options = {}) {
             const favorite = isFavorite(item);
             return `
               <article class="favorite-preview-card" data-inline-preview-card-key="${escapeHtml(key)}">
+                <button
+                  type="button"
+                  class="favorite-preview-remove-button"
+                  data-inline-preview-remove="${escapeHtml(closeAction)}"
+                  data-inline-preview-remove-key="${escapeHtml(key)}"
+                  aria-label="${escapeHtml(item.title || '動画')}を再生対象から外す"
+                  title="再生対象から外す"
+                >
+                  &times;
+                </button>
                 <div class="favorite-preview-player-wrap">
                   <video
                     class="favorite-preview-video"
@@ -1491,6 +1779,75 @@ function renderInlinePreviewSection(items, options = {}) {
       </div>
     </section>
   `;
+}
+
+function removeDashboardInlinePreview(key) {
+  if (!key) {
+    return;
+  }
+
+  const item = currentRankingItems().find((entry) => getItemKey(entry) === key);
+  state.activeDashboardPreviewKeys = state.activeDashboardPreviewKeys.filter((entryKey) => entryKey !== key);
+  if (item) {
+    state.selectedDownloadKeys.delete(getDownloadKey(item));
+  }
+  if (state.activeInlinePreviewAudioKey === key) {
+    state.activeInlinePreviewAudioKey = state.activeDashboardPreviewKeys[0] || '';
+  }
+  renderDashboardRanking();
+  syncDashboardSelectionControls();
+}
+
+function removeFavoriteInlinePreview(key) {
+  if (!key) {
+    return;
+  }
+
+  state.activeFavoritePreviewKeys = state.activeFavoritePreviewKeys.filter((entryKey) => entryKey !== key);
+  state.selectedFavoriteKeys.delete(key);
+  if (state.activeInlinePreviewAudioKey === key) {
+    state.activeInlinePreviewAudioKey = state.activeFavoritePreviewKeys[0] || '';
+  }
+  renderFavorites();
+  syncFavoriteSelectionControls();
+}
+
+function removeSearchInlinePreview(key) {
+  if (!key) {
+    return;
+  }
+
+  state.activeSearchPreviewKeys = state.activeSearchPreviewKeys.filter((entryKey) => entryKey !== key);
+  state.selectedSearchKeys.delete(key);
+  if (state.activeInlinePreviewAudioKey === key) {
+    state.activeInlinePreviewAudioKey = state.activeSearchPreviewKeys[0] || '';
+  }
+  renderSearchResults();
+  syncSearchSelectionControls();
+}
+
+function removeInlinePreview(action, key) {
+  if (action === 'dashboard') {
+    removeDashboardInlinePreview(key);
+    return;
+  }
+  if (action === 'favorites') {
+    removeFavoriteInlinePreview(key);
+    return;
+  }
+  if (action === 'search') {
+    removeSearchInlinePreview(key);
+  }
+}
+
+function bindInlinePreviewRemoveControls(container) {
+  container?.querySelectorAll('[data-inline-preview-remove]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      removeInlinePreview(button.dataset.inlinePreviewRemove, button.dataset.inlinePreviewRemoveKey);
+    });
+  });
 }
 
 async function mountFavoriteInlinePreviews(items) {
@@ -1661,6 +2018,101 @@ function openDashboardInlinePreviews(keys) {
   });
 }
 
+async function mountSearchInlinePreviews(items) {
+  if (!elements.searchResults) {
+    return;
+  }
+
+  const itemMap = new Map(items.map((item) => [getItemKey(item), item]));
+  const videoElements = [...elements.searchResults.querySelectorAll('[data-inline-preview-video]')];
+
+  for (const [key, player] of state.searchPreviewPlayers.entries()) {
+    if (!itemMap.has(key)) {
+      player.destroy();
+      state.searchPreviewPlayers.delete(key);
+    }
+  }
+
+  await Promise.all(
+    videoElements.map(async (video) => {
+      const key = video.dataset.inlinePreviewKey;
+      const item = itemMap.get(key);
+      const status = elements.searchResults.querySelector(`[data-inline-preview-status="${CSS.escape(key)}"]`);
+      if (!key || !item || !status || video.dataset.previewBound === 'true') {
+        return;
+      }
+
+      video.dataset.previewBound = 'true';
+      status.textContent = '読み込み中';
+
+      try {
+        await attachPreviewSource(video, item, {
+          autoplay: true,
+          muted: true,
+          onError: () => {
+            status.textContent = '読み込み失敗';
+          },
+          onAutoplayBlocked: () => {
+            status.textContent = 'プレイヤーの再生ボタンを押してください';
+          },
+          onReady: () => {
+            status.textContent = '';
+          },
+          playerKey: key,
+          playerStore: state.searchPreviewPlayers
+        });
+      } catch (error) {
+        delete video.dataset.previewBound;
+        status.textContent = '読み込み失敗';
+        showMessage(error.message, 'error');
+      }
+    })
+  );
+
+  bindInlinePreviewAudioFocus(elements.searchResults);
+  elements.searchResults.querySelectorAll('[data-inline-preview-favorite]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = button.dataset.inlinePreviewFavorite;
+      const item = itemMap.get(key);
+      if (item) {
+        toggleFavorite(item);
+      }
+    });
+  });
+}
+
+function closeSearchInlinePreviews() {
+  destroySearchPreviewPlayers();
+  state.activeSearchPreviewKeys = [];
+  renderSearchResults();
+}
+
+function openSearchInlinePreviews(keys) {
+  const itemMap = new Map(currentSearchItems().map((item) => [getItemKey(item), item]));
+  const requestedKeys = [...new Set(keys || [])];
+  const nextItems = requestedKeys.map((key) => itemMap.get(key)).filter(isSearchPreviewable);
+  if (!nextItems.length) {
+    showMessage('再生できるサンプル動画があるコンテンツを選択してください。', 'error');
+    return;
+  }
+
+  if (nextItems.length < requestedKeys.length) {
+    showMessage('サンプル動画URLがないコンテンツはスキップしました。', 'info');
+  }
+
+  state.activeSearchPreviewKeys = nextItems.map(getItemKey);
+  state.activeInlinePreviewAudioKey = state.activeSearchPreviewKeys[0] || '';
+  renderSearchResults();
+  window.requestAnimationFrame(() => {
+    elements.searchResults?.querySelector('.favorite-preview-section')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start'
+    });
+  });
+}
+
 function renderFavorites() {
   if (!isDesktopBrowserExperience()) {
     state.favoriteSelectionMode = false;
@@ -1742,6 +2194,7 @@ function renderFavorites() {
       elements.favoritesContent?.querySelector('[data-inline-preview-close="favorites"]')?.addEventListener('click', () => {
         closeFavoriteInlinePreviews();
       });
+      bindInlinePreviewRemoveControls(elements.favoritesContent);
       if (allowInlinePlayback && activePreviewItems.length) {
         queueMicrotask(() => {
           mountFavoriteInlinePreviews(activePreviewItems).catch((error) => {
@@ -2213,6 +2666,10 @@ async function searchActress() {
     query: actress,
     total: 0
   };
+  state.activeSearchPreviewKeys = [];
+  state.selectedSearchKeys.clear();
+  state.searchSelectionMode = false;
+  destroySearchPreviewPlayers();
   state.controlsDirty = false;
   state.renderCache.searchResults = '';
   renderHeaderActions();
@@ -2601,6 +3058,7 @@ function bindStaticEvents() {
     state.touchDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
     syncResponsiveActionPlacement();
     renderFavorites();
+    renderSearchResults();
   });
   document.addEventListener('visibilitychange', () => {
     scheduleAutoRefresh(document.visibilityState === 'visible' ? 1000 : autoRefreshDelay());
