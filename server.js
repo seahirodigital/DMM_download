@@ -153,6 +153,17 @@ function decodeProxyUrl(value) {
   return Buffer.from(String(value || ''), 'base64').toString('utf8');
 }
 
+function sanitizeUrlForLog(value) {
+  try {
+    const url = new URL(value);
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return String(value || '').split('?')[0];
+  }
+}
+
 function isExpectedStreamAbort(error, response) {
   const code = error?.code || error?.cause?.code;
   return (
@@ -487,10 +498,6 @@ async function createApp() {
   }
 
   function buildPreviewAssetUrl(request, assetUrl, refererUrl, previewSession = '') {
-    if (hosted) {
-      return assetUrl;
-    }
-
     const proxyUrl = new URL('/api/preview/asset', `http://${request.headers.host || '127.0.0.1'}`);
     proxyUrl.searchParams.set('url', encodeProxyUrl(assetUrl));
     proxyUrl.searchParams.set('referer', refererUrl || config.ranking.referer);
@@ -582,7 +589,12 @@ async function createApp() {
     }
 
     if (!remoteResponse.ok && remoteResponse.status !== 206) {
-      throw new Error(`Failed to stream preview asset: ${remoteResponse.status} ${targetUrl}`);
+      console.error('[preview/asset] upstream rejected media request', {
+        contentType: remoteResponse.headers.get('content-type') || '',
+        status: remoteResponse.status,
+        targetUrl: sanitizeUrlForLog(targetUrl)
+      });
+      throw new Error(`Failed to stream preview asset: ${remoteResponse.status} ${sanitizeUrlForLog(targetUrl)}`);
     }
 
     const responseHeaders = {
@@ -976,15 +988,6 @@ async function createApp() {
     const source = await resolvePreviewSource(item, { forceRefresh });
     const refererUrl = source.detailUrl || item.detailUrl || config.ranking.referer;
 
-    if (hosted) {
-      response.writeHead(302, {
-        'Cache-Control': 'no-store',
-        Location: source.url
-      });
-      response.end();
-      return;
-    }
-
     if (source.type !== 'hls') {
       await proxyPreviewAsset(source.url, refererUrl, request, response);
       return;
@@ -1017,7 +1020,7 @@ async function createApp() {
     }).toString()}`;
 
     sendJson(response, 200, {
-      playbackUrl: hosted ? source.url : proxiedPlaybackUrl,
+      playbackUrl: proxiedPlaybackUrl,
       type: source.type || 'direct'
     });
   }
@@ -1045,86 +1048,87 @@ async function createApp() {
   }
 
   const requestHandler = async (request, response) => {
+    let requestUrl;
     try {
-      const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
+      requestUrl = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
 
-      if (request.method === 'GET' && url.pathname === '/api/state') {
-        await handleState(url, response);
+      if (request.method === 'GET' && requestUrl.pathname === '/api/state') {
+        await handleState(requestUrl, response);
         return;
       }
 
-      if (request.method === 'POST' && url.pathname === '/api/ranking/fetch') {
+      if (request.method === 'POST' && requestUrl.pathname === '/api/ranking/fetch') {
         await handleFetchRanking(request, response);
         return;
       }
 
-      if ((request.method === 'GET' || request.method === 'POST') && isActressSearchPath(url.pathname)) {
-        await handleActressSearch(url, request, response);
+      if ((request.method === 'GET' || request.method === 'POST') && isActressSearchPath(requestUrl.pathname)) {
+        await handleActressSearch(requestUrl, request, response);
         return;
       }
 
-      if (request.method === 'POST' && url.pathname === '/api/settings') {
+      if (request.method === 'POST' && requestUrl.pathname === '/api/settings') {
         await handleSettings(request, response);
         return;
       }
 
-      if (request.method === 'POST' && url.pathname === '/api/session/cookie') {
+      if (request.method === 'POST' && requestUrl.pathname === '/api/session/cookie') {
         await handleSaveCookie(request, response);
         return;
       }
 
-      if (request.method === 'POST' && url.pathname === '/api/session/import-n8n-cookie') {
+      if (request.method === 'POST' && requestUrl.pathname === '/api/session/import-n8n-cookie') {
         await handleImportN8nCookie(response);
         return;
       }
 
-      if (request.method === 'POST' && url.pathname === '/api/session/clear-cookie') {
+      if (request.method === 'POST' && requestUrl.pathname === '/api/session/clear-cookie') {
         await handleClearCookie(response);
         return;
       }
 
-      if (request.method === 'GET' && url.pathname === '/api/history') {
-        await handleHistory(url, response);
+      if (request.method === 'GET' && requestUrl.pathname === '/api/history') {
+        await handleHistory(requestUrl, response);
         return;
       }
 
-      if (request.method === 'GET' && url.pathname === '/api/library') {
-        await handleLibrary(url, response);
+      if (request.method === 'GET' && requestUrl.pathname === '/api/library') {
+        await handleLibrary(requestUrl, response);
         return;
       }
 
-      if (request.method === 'GET' && url.pathname === '/api/preview/play') {
-        await handlePreviewPlay(url, request, response);
+      if (request.method === 'GET' && requestUrl.pathname === '/api/preview/play') {
+        await handlePreviewPlay(requestUrl, request, response);
         return;
       }
 
-      if (request.method === 'GET' && url.pathname === '/api/preview/info') {
-        await handlePreviewInfo(url, response);
+      if (request.method === 'GET' && requestUrl.pathname === '/api/preview/info') {
+        await handlePreviewInfo(requestUrl, response);
         return;
       }
 
-      if (request.method === 'GET' && url.pathname === '/api/preview/asset') {
-        await handlePreviewAsset(url, request, response);
+      if (request.method === 'GET' && requestUrl.pathname === '/api/preview/asset') {
+        await handlePreviewAsset(requestUrl, request, response);
         return;
       }
 
-      if (request.method === 'POST' && url.pathname === '/api/download/start') {
+      if (request.method === 'POST' && requestUrl.pathname === '/api/download/start') {
         await handleDownloadStart(request, response);
         return;
       }
 
-      if (request.method === 'POST' && url.pathname === '/api/download/stop') {
+      if (request.method === 'POST' && requestUrl.pathname === '/api/download/stop') {
         await handleDownloadStop(response);
         return;
       }
 
-      if (request.method === 'GET' && url.pathname === '/api/video') {
-        await handleVideoStream(url, request, response);
+      if (request.method === 'GET' && requestUrl.pathname === '/api/video') {
+        await handleVideoStream(requestUrl, request, response);
         return;
       }
 
       if (request.method === 'GET') {
-        await serveStaticFile(response, publicDir, url.pathname);
+        await serveStaticFile(response, publicDir, requestUrl.pathname);
         return;
       }
 
@@ -1136,6 +1140,11 @@ async function createApp() {
         }
         return;
       }
+      console.error('[request] handler failed', {
+        error: error.message,
+        method: request.method,
+        pathname: requestUrl?.pathname || ''
+      });
       sendJson(response, 500, {
         error: error.message
       });
