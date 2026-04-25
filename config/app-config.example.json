@@ -25,6 +25,9 @@
   "affiliate": {
     "searchAffiliateId": "cycreator-003",
     "apiId": "",
+    "affiliateId": "",
+    "actressSearchEndpoint": "https://api.dmm.com/affiliate/v3/ActressSearch",
+    "actressSearchSort": "name",
     "itemListAffiliateId": "",
     "itemListEndpoint": "https://api.dmm.com/affiliate/v3/ItemList",
     "itemListSite": "DMM.com",

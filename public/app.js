@@ -176,6 +176,7 @@ function normalizeFavoriteItem(item) {
     searchUrl: item.searchUrl || '',
     seasonId: item.seasonId || '',
     sourcePageUrl: item.sourcePageUrl || '',
+    thumbnailFallbackUrl: item.thumbnailFallbackUrl || '',
     thumbnailUrl: item.thumbnailUrl || '',
     title: item.title || '',
     updatedAt: new Date().toISOString()
@@ -1099,7 +1100,14 @@ function renderRankingSection(container, options) {
                       rel="noreferrer"
                       ${selectionAttrs}
                     >
-                      <img class="ranking-card-image" src="${escapeHtml(item.thumbnailUrl)}" alt="${escapeHtml(item.title)}" decoding="async" />
+                      <img
+                        class="ranking-card-image"
+                        src="${escapeHtml(item.thumbnailUrl)}"
+                        ${item.thumbnailFallbackUrl ? `data-fallback-src="${escapeHtml(item.thumbnailFallbackUrl)}" onerror="if (this.dataset.fallbackSrc && this.src !== this.dataset.fallbackSrc) { this.src = this.dataset.fallbackSrc; this.removeAttribute('data-fallback-src'); }"` : ''}
+                        alt="${escapeHtml(item.title)}"
+                        decoding="async"
+                        loading="lazy"
+                      />
                     </a>`
                   : `<a
                       class="ranking-card-image-link ranking-card-image-empty ${selectable ? 'ranking-card-image-link-selectable' : ''}"
@@ -2211,13 +2219,11 @@ async function searchActress() {
   renderSearchResults();
 
   try {
-    const result = await requestJson('/api/search/actress', {
-      body: JSON.stringify({
-        actress,
-        pageSize: 100
-      }),
-      method: 'POST'
+    const params = new URLSearchParams({
+      actress,
+      pageSize: '100'
     });
+    const result = await requestJson(`/api/search/actress?${params.toString()}`);
     state.search = {
       error: '',
       fetchedAt: result.search?.fetchedAt || null,

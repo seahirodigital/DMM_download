@@ -397,6 +397,26 @@ a:hover {
   gap: 10px;
 }
 
+.nav-button[data-tab="dashboard"] {
+  order: 1;
+}
+
+.nav-button[data-tab="search"] {
+  order: 2;
+}
+
+.nav-button[data-tab="favorites"] {
+  order: 3;
+}
+
+.nav-button[data-tab="viewer"] {
+  order: 4;
+}
+
+.nav-button[data-tab="history"] {
+  order: 5;
+}
+
 .mobile-sidebar-actions {
   display: none;
 }

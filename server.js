@@ -247,6 +247,10 @@ function buildHistoryCsvRows(ranking) {
   }));
 }
 
+function isActressSearchPath(pathname) {
+  return pathname === '/api/search/actress' || pathname === '/search/actress' || pathname === '/actress';
+}
+
 async function createApp() {
   const config = await loadConfig();
   const hosted = config.appMode === 'hosted';
@@ -509,11 +513,11 @@ async function createApp() {
     });
   }
 
-  async function handleActressSearch(request, response) {
-    const body = await readRequestBody(request);
+  async function handleActressSearch(url, request, response) {
+    const body = request.method === 'GET' ? {} : await readRequestBody(request);
     const search = await fetchActressSearch(config, {
-      actress: body.actress,
-      pageSize: body.pageSize
+      actress: body.actress || url.searchParams.get('actress') || url.searchParams.get('keyword'),
+      pageSize: body.pageSize || url.searchParams.get('pageSize')
     });
 
     sendJson(response, 200, {
@@ -894,8 +898,8 @@ async function createApp() {
         return;
       }
 
-      if (request.method === 'POST' && url.pathname === '/api/search/actress') {
-        await handleActressSearch(request, response);
+      if ((request.method === 'GET' || request.method === 'POST') && isActressSearchPath(url.pathname)) {
+        await handleActressSearch(url, request, response);
         return;
       }
 
