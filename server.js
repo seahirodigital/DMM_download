@@ -972,6 +972,15 @@ async function createApp() {
     const source = await resolvePreviewSource(item, { forceRefresh });
     const refererUrl = source.detailUrl || item.detailUrl || config.ranking.referer;
 
+    if (hosted) {
+      response.writeHead(302, {
+        'Cache-Control': 'no-store',
+        Location: source.url
+      });
+      response.end();
+      return;
+    }
+
     if (source.type !== 'hls') {
       await proxyPreviewAsset(source.url, refererUrl, request, response);
       return;
@@ -998,11 +1007,13 @@ async function createApp() {
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || Date.now());
     const source = await resolvePreviewSource(item, { forceRefresh });
+    const proxiedPlaybackUrl = `/api/preview/play?${buildPreviewPlaybackParams(item, {
+      forceRefresh,
+      session: previewSession
+    }).toString()}`;
+
     sendJson(response, 200, {
-      playbackUrl: `/api/preview/play?${buildPreviewPlaybackParams(item, {
-        forceRefresh,
-        session: previewSession
-      }).toString()}`,
+      playbackUrl: hosted ? source.url : proxiedPlaybackUrl,
       type: source.type || 'direct'
     });
   }
