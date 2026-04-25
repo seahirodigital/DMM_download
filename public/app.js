@@ -5,8 +5,10 @@ const state = {
   activeSearchPreviewKeys: [],
   controlsDirty: false,
   dashboardPreviewPlayers: new Map(),
+  dashboardPreviewToken: 0,
   downloadSelectionMode: false,
   favoritePreviewPlayers: new Map(),
+  favoritePreviewToken: 0,
   favoriteSelectionMode: false,
   favorites: {},
   headerActionsMode: '',
@@ -44,6 +46,7 @@ const state = {
   selectedSearchKeys: new Set(),
   settingsOpen: false,
   searchPreviewPlayers: new Map(),
+  searchPreviewToken: 0,
   searchSelectionMode: false,
   shortcutModalOpen: false,
   snapshot: null,
@@ -57,6 +60,12 @@ const state = {
 const elements = {};
 const FAVORITES_STORAGE_KEY = 'dmm-download-favorites-v1';
 const previewInfoCache = new Map();
+const INLINE_PREVIEW_TOKEN_KEYS = {
+  dashboard: 'dashboardPreviewToken',
+  favorites: 'favoritePreviewToken',
+  search: 'searchPreviewToken'
+};
+let previewSourceTokenCounter = 0;
 
 function qs(id) {
   return document.getElementById(id);
@@ -88,7 +97,7 @@ function currentSearchItems() {
 }
 
 function isSearchPreviewable(item) {
-  return Boolean(item?.seasonId || item?.playbackUrl);
+  return Boolean(item?.seasonId || item?.playbackUrl || item?.detailUrl);
 }
 
 function selectedRankingItems() {
@@ -233,6 +242,75 @@ function toggleSearchSelection(key, isSelected = !state.selectedSearchKeys.has(k
 
   renderSearchResults();
   syncSearchSelectionControls();
+}
+
+function isTextEntryTarget(target) {
+  const tag = target?.tagName?.toLowerCase();
+  if (tag === 'textarea' || tag === 'select' || target?.isContentEditable) {
+    return true;
+  }
+
+  if (tag !== 'input') {
+    return false;
+  }
+
+  return !['button', 'checkbox', 'color', 'file', 'image', 'radio', 'range', 'reset', 'submit'].includes(
+    String(target.type || '').toLowerCase()
+  );
+}
+
+function isCommandShortcutTarget(target) {
+  return Boolean(target?.closest?.('button, a, [role="button"]'));
+}
+
+function playSelectedInlinePreviewsForCurrentTab() {
+  if (!isDesktopBrowserExperience()) {
+    return false;
+  }
+
+  if (state.tab === 'dashboard' && state.downloadSelectionMode && state.selectedDownloadKeys.size) {
+    openDashboardInlinePreviews([...state.selectedDownloadKeys]);
+    return true;
+  }
+
+  if (state.tab === 'favorites' && state.favoriteSelectionMode && state.selectedFavoriteKeys.size) {
+    openFavoriteInlinePreviews([...state.selectedFavoriteKeys]);
+    return true;
+  }
+
+  if (state.tab === 'search' && state.searchSelectionMode && state.selectedSearchKeys.size) {
+    openSearchInlinePreviews([...state.selectedSearchKeys]);
+    return true;
+  }
+
+  return false;
+}
+
+function handleSelectionPlayShortcut(event) {
+  if (
+    event.key !== 'Enter' ||
+    event.isComposing ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.shiftKey ||
+    state.settingsOpen ||
+    state.thumbnailModalOpen ||
+    state.previewModalOpen ||
+    state.shortcutModalOpen ||
+    isTextEntryTarget(event.target) ||
+    isCommandShortcutTarget(event.target)
+  ) {
+    return false;
+  }
+
+  if (!playSelectedInlinePreviewsForCurrentTab()) {
+    return false;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  return true;
 }
 
 function normalizeFavoriteItem(item) {
@@ -848,7 +926,7 @@ function buildCardPlaybackUrl(item) {
   return preferHighQualityPlaybackUrl(item?.playbackUrl) || item?.detailUrl || buildPlaybackUrl(item);
 }
 
-function buildPreviewUrl(item) {
+function buildPreviewUrl(item, options = {}) {
   const seasonId = item?.seasonId || '';
   const contentId = item?.contentId || seasonId;
   const params = new URLSearchParams();
@@ -863,11 +941,17 @@ function buildPreviewUrl(item) {
   }
   if (!seasonId && item?.detailUrl) {
     params.set('detail', item.detailUrl);
+  }
+  if (options.forceRefresh) {
+    params.set('refresh', '1');
+  }
+  if (options.cacheBust) {
+    params.set('_preview', options.cacheBust);
   }
   return `/api/preview/play?${params.toString()}`;
 }
 
-function buildPreviewInfoUrl(item) {
+function buildPreviewInfoUrl(item, options = {}) {
   const seasonId = item?.seasonId || '';
   const contentId = item?.contentId || seasonId;
   const params = new URLSearchParams();
@@ -882,12 +966,27 @@ function buildPreviewInfoUrl(item) {
   }
   if (!seasonId && item?.detailUrl) {
     params.set('detail', item.detailUrl);
+  }
+  if (options.forceRefresh) {
+    params.set('refresh', '1');
+  }
+  if (options.cacheBust) {
+    params.set('_preview', options.cacheBust);
   }
   return `/api/preview/info?${params.toString()}`;
 }
 
 function buildPreviewCacheKey(item) {
   return `${item?.seasonId || ''}:${item?.contentId || item?.seasonId || item?.playbackUrl || item?.detailUrl || ''}`;
+}
+
+function nextPreviewSourceToken() {
+  previewSourceTokenCounter += 1;
+  return `${Date.now()}-${previewSourceTokenCounter}`;
+}
+
+function clearPreviewInfoCache(item) {
+  previewInfoCache.delete(buildPreviewCacheKey(item));
 }
 
 function previewSupportsNativeHls(video) {
@@ -900,9 +999,29 @@ function supportsInlinePreview() {
   return Boolean(elements.previewPlayer && (previewSupportsNativeHls(elements.previewPlayer) || window.Hls?.isSupported()));
 }
 
-async function getPreviewInfo(item) {
+function currentInlinePreviewToken(kind) {
+  const stateKey = INLINE_PREVIEW_TOKEN_KEYS[kind];
+  return stateKey ? state[stateKey] : 0;
+}
+
+function bumpInlinePreviewToken(kind) {
+  const stateKey = INLINE_PREVIEW_TOKEN_KEYS[kind];
+  if (!stateKey) {
+    return 0;
+  }
+
+  state[stateKey] += 1;
+  return state[stateKey];
+}
+
+function isInlinePreviewMountCurrent(kind, token, video) {
+  return currentInlinePreviewToken(kind) === token && (!video || video.isConnected);
+}
+
+async function getPreviewInfo(item, options = {}) {
   const cacheKey = buildPreviewCacheKey(item);
-  const cached = previewInfoCache.get(cacheKey);
+  const { forceRefresh = false, cacheBust = '' } = options;
+  const cached = forceRefresh ? null : previewInfoCache.get(cacheKey);
   if (cached) {
     return Promise.resolve(cached);
   }
@@ -911,9 +1030,13 @@ async function getPreviewInfo(item) {
     throw new Error('このコンテンツにはページ内プレビュー用の動画情報がありません。');
   }
 
-  const pending = requestJson(buildPreviewInfoUrl(item)).then((payload) => {
+  if (forceRefresh) {
+    previewInfoCache.delete(cacheKey);
+  }
+
+  const pending = requestJson(buildPreviewInfoUrl(item, { cacheBust, forceRefresh })).then((payload) => {
     const resolved = {
-      playbackUrl: payload.playbackUrl || buildPreviewUrl(item),
+      playbackUrl: payload.playbackUrl || buildPreviewUrl(item, { cacheBust, forceRefresh }),
       type: payload.type || 'direct'
     };
     previewInfoCache.set(cacheKey, resolved);
@@ -943,6 +1066,7 @@ function resetVideoElement(video) {
   } catch {}
 
   video.removeAttribute('src');
+  delete video.dataset.previewSourceToken;
   video.load();
 }
 
@@ -972,20 +1096,34 @@ function attachPreviewIframe(video, info, options = {}) {
   return info;
 }
 
+function destroyHlsPlayerInstance(player) {
+  if (!player) {
+    return;
+  }
+
+  try {
+    player.stopLoad?.();
+    player.detachMedia?.();
+    player.destroy();
+  } catch {}
+}
+
 function destroyPreviewHlsPlayer() {
   if (!state.previewHlsPlayer) {
     return;
   }
 
-  state.previewHlsPlayer.destroy();
+  destroyHlsPlayerInstance(state.previewHlsPlayer);
   state.previewHlsPlayer = null;
 }
 
 function destroyFavoritePreviewPlayers() {
+  bumpInlinePreviewToken('favorites');
   for (const player of state.favoritePreviewPlayers.values()) {
-    player.destroy();
+    destroyHlsPlayerInstance(player);
   }
   state.favoritePreviewPlayers.clear();
+  state.renderCache.favorites = '';
 
   elements.favoritesContent?.querySelectorAll('[data-inline-preview-video]').forEach((video) => {
     resetVideoElement(video);
@@ -994,10 +1132,12 @@ function destroyFavoritePreviewPlayers() {
 }
 
 function destroyDashboardPreviewPlayers() {
+  bumpInlinePreviewToken('dashboard');
   for (const player of state.dashboardPreviewPlayers.values()) {
-    player.destroy();
+    destroyHlsPlayerInstance(player);
   }
   state.dashboardPreviewPlayers.clear();
+  state.renderCache.dashboardRanking = '';
 
   elements.dashboardRanking?.querySelectorAll('[data-inline-preview-video]').forEach((video) => {
     resetVideoElement(video);
@@ -1006,10 +1146,12 @@ function destroyDashboardPreviewPlayers() {
 }
 
 function destroySearchPreviewPlayers() {
+  bumpInlinePreviewToken('search');
   for (const player of state.searchPreviewPlayers.values()) {
-    player.destroy();
+    destroyHlsPlayerInstance(player);
   }
   state.searchPreviewPlayers.clear();
+  state.renderCache.searchResults = '';
 
   elements.searchResults?.querySelectorAll('[data-inline-preview-video]').forEach((video) => {
     resetVideoElement(video);
@@ -1073,21 +1215,49 @@ async function attachPreviewSource(video, item, options = {}) {
     throw new Error('プレビュー用の video 要素が見つかりません。');
   }
 
-  const info = await getPreviewInfo(item);
   const {
     autoplay = false,
+    cacheBust = nextPreviewSourceToken(),
+    forceRefresh = false,
     muted = false,
     onAutoplayBlocked,
     onError,
     onReady,
     playerKey = '',
-    playerStore = null
+    playerStore = null,
+    retryCount = 0,
+    shouldContinue = () => true
   } = options;
+  if (!shouldContinue()) {
+    return null;
+  }
+
+  let info;
+  try {
+    info = await getPreviewInfo(item, { cacheBust, forceRefresh });
+  } catch (error) {
+    if (retryCount <= 0 || !shouldContinue()) {
+      throw error;
+    }
+
+    clearPreviewInfoCache(item);
+    return attachPreviewSource(video, item, {
+      ...options,
+      cacheBust: nextPreviewSourceToken(),
+      forceRefresh: true,
+      retryCount: retryCount - 1
+    });
+  }
+
+  if (!shouldContinue()) {
+    return null;
+  }
+
   const useNativeHls = previewSupportsNativeHls(video);
   const activeStore = playerStore || null;
 
   if (activeStore && playerKey && activeStore.has(playerKey)) {
-    activeStore.get(playerKey).destroy();
+    destroyHlsPlayerInstance(activeStore.get(playerKey));
     activeStore.delete(playerKey);
   }
 
@@ -1095,17 +1265,62 @@ async function attachPreviewSource(video, item, options = {}) {
     destroyPreviewHlsPlayer();
   }
 
+  if (!shouldContinue()) {
+    return null;
+  }
+
   resetVideoElement(video);
   video.muted = Boolean(muted);
   video.defaultMuted = Boolean(muted);
+  const sourceToken = nextPreviewSourceToken();
+  video.dataset.previewSourceToken = sourceToken;
+  const isCurrentSource = () => shouldContinue() && video.dataset.previewSourceToken === sourceToken;
+  const retryWithFreshSource = (error) => {
+    if (!isCurrentSource()) {
+      return;
+    }
+
+    if (retryCount <= 0) {
+      onError?.(error);
+      return;
+    }
+
+    clearPreviewInfoCache(item);
+    if (activeStore && playerKey && activeStore.has(playerKey)) {
+      destroyHlsPlayerInstance(activeStore.get(playerKey));
+      activeStore.delete(playerKey);
+    }
+    if (!activeStore) {
+      destroyPreviewHlsPlayer();
+    }
+
+    attachPreviewSource(video, item, {
+      ...options,
+      cacheBust: nextPreviewSourceToken(),
+      forceRefresh: true,
+      retryCount: retryCount - 1
+    }).catch((retryError) => {
+      if (shouldContinue()) {
+        onError?.(retryError);
+      }
+    });
+  };
 
   if (info.type === 'iframe') {
     return attachPreviewIframe(video, info, {
-      onReady
+      onReady: (readyInfo) => {
+        if (isCurrentSource()) {
+          onReady?.(readyInfo);
+        }
+      }
     });
   }
 
   const handleReady = () => {
+    if (!isCurrentSource()) {
+      return;
+    }
+
     onReady?.(info);
     if (autoplay) {
       video.play().catch((error) => {
@@ -1118,7 +1333,9 @@ async function attachPreviewSource(video, item, options = {}) {
   video.addEventListener(
     'error',
     () => {
-      onError?.(new Error('プレビューを読み込めませんでした。'));
+      if (isCurrentSource()) {
+        retryWithFreshSource(new Error('プレビューを読み込めませんでした。'));
+      }
     },
     { once: true }
   );
@@ -1139,8 +1356,8 @@ async function attachPreviewSource(video, item, options = {}) {
     });
 
     hls.on(window.Hls.Events.ERROR, (_event, data) => {
-      if (data?.fatal) {
-        onError?.(new Error('HLS プレビューの再生に失敗しました。'));
+      if (data?.fatal && isCurrentSource()) {
+        retryWithFreshSource(new Error('HLS プレビューの再生に失敗しました。'));
       }
     });
     hls.loadSource(info.playbackUrl);
@@ -1514,8 +1731,9 @@ function renderDashboardRanking() {
       });
       bindInlinePreviewRemoveControls(elements.dashboardRanking);
       if (allowInlinePlayback && activePreviewItems.length) {
+        const mountToken = currentInlinePreviewToken('dashboard');
         queueMicrotask(() => {
-          mountDashboardInlinePreviews(activePreviewItems).catch((error) => {
+          mountDashboardInlinePreviews(activePreviewItems, mountToken).catch((error) => {
             showMessage(error.message, 'error');
           });
         });
@@ -1635,8 +1853,9 @@ function renderSearchResults() {
       });
       bindInlinePreviewRemoveControls(elements.searchResults);
       if (allowInlinePlayback && activePreviewItems.length) {
+        const mountToken = currentInlinePreviewToken('search');
         queueMicrotask(() => {
-          mountSearchInlinePreviews(activePreviewItems).catch((error) => {
+          mountSearchInlinePreviews(activePreviewItems, mountToken).catch((error) => {
             showMessage(error.message, 'error');
           });
         });
@@ -1850,8 +2069,8 @@ function bindInlinePreviewRemoveControls(container) {
   });
 }
 
-async function mountFavoriteInlinePreviews(items) {
-  if (!elements.favoritesContent) {
+async function mountFavoriteInlinePreviews(items, mountToken = currentInlinePreviewToken('favorites')) {
+  if (!elements.favoritesContent || !isInlinePreviewMountCurrent('favorites', mountToken)) {
     return;
   }
 
@@ -1870,6 +2089,9 @@ async function mountFavoriteInlinePreviews(items) {
       const key = video.dataset.inlinePreviewKey;
       const item = itemMap.get(key);
       const status = elements.favoritesContent.querySelector(`[data-inline-preview-status="${CSS.escape(key)}"]`);
+      if (!isInlinePreviewMountCurrent('favorites', mountToken, video)) {
+        return;
+      }
       if (!key || !item || !status || video.dataset.previewBound === 'true') {
         return;
       }
@@ -1880,6 +2102,7 @@ async function mountFavoriteInlinePreviews(items) {
       try {
         await attachPreviewSource(video, item, {
           autoplay: true,
+          forceRefresh: true,
           muted: true,
           onError: () => {
             status.textContent = '読み込み失敗';
@@ -1891,15 +2114,24 @@ async function mountFavoriteInlinePreviews(items) {
             status.textContent = '';
           },
           playerKey: key,
-          playerStore: state.favoritePreviewPlayers
+          playerStore: state.favoritePreviewPlayers,
+          retryCount: 1,
+          shouldContinue: () => isInlinePreviewMountCurrent('favorites', mountToken, video)
         });
       } catch (error) {
+        if (!isInlinePreviewMountCurrent('favorites', mountToken, video)) {
+          return;
+        }
         delete video.dataset.previewBound;
         status.textContent = '読み込み失敗';
         showMessage(error.message, 'error');
       }
     })
   );
+
+  if (!isInlinePreviewMountCurrent('favorites', mountToken)) {
+    return;
+  }
 
   bindInlinePreviewAudioFocus(elements.favoritesContent);
 }
@@ -1919,6 +2151,7 @@ function openFavoriteInlinePreviews(keys) {
 
   state.activeFavoritePreviewKeys = nextKeys;
   state.activeInlinePreviewAudioKey = nextKeys[0] || '';
+  state.renderCache.favorites = '';
   renderFavorites();
   window.requestAnimationFrame(() => {
     elements.favoritesContent?.querySelector('.favorite-preview-section')?.scrollIntoView({
@@ -1928,8 +2161,8 @@ function openFavoriteInlinePreviews(keys) {
   });
 }
 
-async function mountDashboardInlinePreviews(items) {
-  if (!elements.dashboardRanking) {
+async function mountDashboardInlinePreviews(items, mountToken = currentInlinePreviewToken('dashboard')) {
+  if (!elements.dashboardRanking || !isInlinePreviewMountCurrent('dashboard', mountToken)) {
     return;
   }
 
@@ -1948,6 +2181,9 @@ async function mountDashboardInlinePreviews(items) {
       const key = video.dataset.inlinePreviewKey;
       const item = itemMap.get(key);
       const status = elements.dashboardRanking.querySelector(`[data-inline-preview-status="${CSS.escape(key)}"]`);
+      if (!isInlinePreviewMountCurrent('dashboard', mountToken, video)) {
+        return;
+      }
       if (!key || !item || !status || video.dataset.previewBound === 'true') {
         return;
       }
@@ -1958,6 +2194,7 @@ async function mountDashboardInlinePreviews(items) {
       try {
         await attachPreviewSource(video, item, {
           autoplay: true,
+          forceRefresh: true,
           muted: true,
           onError: () => {
             status.textContent = '読み込み失敗';
@@ -1969,15 +2206,24 @@ async function mountDashboardInlinePreviews(items) {
             status.textContent = '';
           },
           playerKey: key,
-          playerStore: state.dashboardPreviewPlayers
+          playerStore: state.dashboardPreviewPlayers,
+          retryCount: 1,
+          shouldContinue: () => isInlinePreviewMountCurrent('dashboard', mountToken, video)
         });
       } catch (error) {
+        if (!isInlinePreviewMountCurrent('dashboard', mountToken, video)) {
+          return;
+        }
         delete video.dataset.previewBound;
         status.textContent = '読み込み失敗';
         showMessage(error.message, 'error');
       }
     })
   );
+
+  if (!isInlinePreviewMountCurrent('dashboard', mountToken)) {
+    return;
+  }
 
   bindInlinePreviewAudioFocus(elements.dashboardRanking);
   elements.dashboardRanking.querySelectorAll('[data-inline-preview-favorite]').forEach((button) => {
@@ -2009,6 +2255,7 @@ function openDashboardInlinePreviews(keys) {
 
   state.activeDashboardPreviewKeys = nextItems.map(getItemKey);
   state.activeInlinePreviewAudioKey = state.activeDashboardPreviewKeys[0] || '';
+  state.renderCache.dashboardRanking = '';
   renderDashboardRanking();
   window.requestAnimationFrame(() => {
     elements.dashboardRanking?.querySelector('.favorite-preview-section')?.scrollIntoView({
@@ -2018,8 +2265,8 @@ function openDashboardInlinePreviews(keys) {
   });
 }
 
-async function mountSearchInlinePreviews(items) {
-  if (!elements.searchResults) {
+async function mountSearchInlinePreviews(items, mountToken = currentInlinePreviewToken('search')) {
+  if (!elements.searchResults || !isInlinePreviewMountCurrent('search', mountToken)) {
     return;
   }
 
@@ -2038,6 +2285,9 @@ async function mountSearchInlinePreviews(items) {
       const key = video.dataset.inlinePreviewKey;
       const item = itemMap.get(key);
       const status = elements.searchResults.querySelector(`[data-inline-preview-status="${CSS.escape(key)}"]`);
+      if (!isInlinePreviewMountCurrent('search', mountToken, video)) {
+        return;
+      }
       if (!key || !item || !status || video.dataset.previewBound === 'true') {
         return;
       }
@@ -2048,6 +2298,7 @@ async function mountSearchInlinePreviews(items) {
       try {
         await attachPreviewSource(video, item, {
           autoplay: true,
+          forceRefresh: true,
           muted: true,
           onError: () => {
             status.textContent = '読み込み失敗';
@@ -2059,15 +2310,24 @@ async function mountSearchInlinePreviews(items) {
             status.textContent = '';
           },
           playerKey: key,
-          playerStore: state.searchPreviewPlayers
+          playerStore: state.searchPreviewPlayers,
+          retryCount: 1,
+          shouldContinue: () => isInlinePreviewMountCurrent('search', mountToken, video)
         });
       } catch (error) {
+        if (!isInlinePreviewMountCurrent('search', mountToken, video)) {
+          return;
+        }
         delete video.dataset.previewBound;
         status.textContent = '読み込み失敗';
         showMessage(error.message, 'error');
       }
     })
   );
+
+  if (!isInlinePreviewMountCurrent('search', mountToken)) {
+    return;
+  }
 
   bindInlinePreviewAudioFocus(elements.searchResults);
   elements.searchResults.querySelectorAll('[data-inline-preview-favorite]').forEach((button) => {
@@ -2104,6 +2364,7 @@ function openSearchInlinePreviews(keys) {
 
   state.activeSearchPreviewKeys = nextItems.map(getItemKey);
   state.activeInlinePreviewAudioKey = state.activeSearchPreviewKeys[0] || '';
+  state.renderCache.searchResults = '';
   renderSearchResults();
   window.requestAnimationFrame(() => {
     elements.searchResults?.querySelector('.favorite-preview-section')?.scrollIntoView({
@@ -2196,8 +2457,9 @@ function renderFavorites() {
       });
       bindInlinePreviewRemoveControls(elements.favoritesContent);
       if (allowInlinePlayback && activePreviewItems.length) {
+        const mountToken = currentInlinePreviewToken('favorites');
         queueMicrotask(() => {
-          mountFavoriteInlinePreviews(activePreviewItems).catch((error) => {
+          mountFavoriteInlinePreviews(activePreviewItems, mountToken).catch((error) => {
             showMessage(error.message, 'error');
           });
         });
@@ -2961,6 +3223,10 @@ function bindStaticEvents() {
   elements.settingsCloseButton.addEventListener('click', () => setSettingsPanelOpen(false));
   elements.settingsOverlay.addEventListener('click', () => setSettingsPanelOpen(false));
   document.addEventListener('keydown', (event) => {
+    if (handleSelectionPlayShortcut(event)) {
+      return;
+    }
+
     if (event.key === 'Escape' && state.mobileMenuOpen) {
       setMobileMenuOpen(false);
       return;

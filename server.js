@@ -3,6 +3,7 @@ const fsp = require('node:fs/promises');
 const http = require('node:http');
 const path = require('node:path');
 const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 
 const { getPublicConfig, loadConfig, saveConfigPatch } = require('./lib/config');
 const { DownloadManager } = require('./lib/download-manager');
@@ -150,6 +151,20 @@ function encodeProxyUrl(value) {
 
 function decodeProxyUrl(value) {
   return Buffer.from(String(value || ''), 'base64').toString('utf8');
+}
+
+function isExpectedStreamAbort(error, response) {
+  const code = error?.code || error?.cause?.code;
+  return (
+    response.writableEnded ||
+    error?.name === 'AbortError' ||
+    error?.name === 'TimeoutError' ||
+    code === 'ABORT_ERR' ||
+    code === 'ECONNRESET' ||
+    code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+    code === 'UND_ERR_ABORTED' ||
+    code === 'UND_ERR_SOCKET'
+  );
 }
 
 async function readRequestBody(request) {
@@ -420,7 +435,7 @@ async function createApp() {
     };
   }
 
-  function buildPreviewPlaybackParams(item) {
+  function buildPreviewPlaybackParams(item, options = {}) {
     const params = new URLSearchParams();
     if (item.seasonId) {
       params.set('season', item.seasonId);
@@ -434,13 +449,19 @@ async function createApp() {
     if (item.detailUrl && !item.seasonId) {
       params.set('detail', item.detailUrl);
     }
+    if (options.forceRefresh) {
+      params.set('refresh', '1');
+    }
+    if (options.session) {
+      params.set('_preview', options.session);
+    }
     return params;
   }
 
-  async function resolvePreviewSource(item) {
+  async function resolvePreviewSource(item, options = {}) {
     const cacheKey = `${item.seasonId || ''}:${item.contentId || item.seasonId || item.playbackUrl || item.detailUrl || ''}`;
     const cached = previewSourceCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
+    if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) {
       return cached.source;
     }
 
@@ -465,22 +486,25 @@ async function createApp() {
     return response.text();
   }
 
-  function buildPreviewAssetUrl(request, assetUrl, refererUrl) {
+  function buildPreviewAssetUrl(request, assetUrl, refererUrl, previewSession = '') {
     const proxyUrl = new URL('/api/preview/asset', `http://${request.headers.host || '127.0.0.1'}`);
     proxyUrl.searchParams.set('url', encodeProxyUrl(assetUrl));
     proxyUrl.searchParams.set('referer', refererUrl || config.ranking.referer);
+    if (previewSession) {
+      proxyUrl.searchParams.set('_preview', previewSession);
+    }
     return proxyUrl.pathname + proxyUrl.search;
   }
 
-  function rewriteManifestAttribute(line, manifestUrl, request, refererUrl) {
+  function rewriteManifestAttribute(line, manifestUrl, request, refererUrl, previewSession = '') {
     return line.replace(/(URI=)("[^"]*"|[^,]*)/i, (_, prefix, rawValue) => {
       const normalized = String(rawValue || '').replace(/^"|"$/g, '');
       const resolved = new URL(normalized, manifestUrl).toString();
-      return `${prefix}"${buildPreviewAssetUrl(request, resolved, refererUrl)}"`;
+      return `${prefix}"${buildPreviewAssetUrl(request, resolved, refererUrl, previewSession)}"`;
     });
   }
 
-  function rewriteMediaPlaylist(manifestUrl, manifestText, request, refererUrl) {
+  function rewriteMediaPlaylist(manifestUrl, manifestText, request, refererUrl, previewSession = '') {
     return manifestText
       .split(/\r?\n/)
       .map((line) => {
@@ -490,7 +514,7 @@ async function createApp() {
         }
 
         if (trimmed.startsWith('#EXT-X-KEY:') || trimmed.startsWith('#EXT-X-MAP:')) {
-          return rewriteManifestAttribute(line, manifestUrl, request, refererUrl);
+          return rewriteManifestAttribute(line, manifestUrl, request, refererUrl, previewSession);
         }
 
         if (trimmed.startsWith('#')) {
@@ -498,7 +522,7 @@ async function createApp() {
         }
 
         const resolved = new URL(trimmed, manifestUrl).toString();
-        return buildPreviewAssetUrl(request, resolved, refererUrl);
+        return buildPreviewAssetUrl(request, resolved, refererUrl, previewSession);
       })
       .join('\n');
   }
@@ -538,10 +562,20 @@ async function createApp() {
       headers.Range = request.headers.range;
     }
 
-    const remoteResponse = await fetch(targetUrl, {
-      headers,
-      signal: AbortSignal.timeout(config.downloads.requestTimeoutMs)
-    });
+    const controller = new AbortController();
+    const headerTimeout = setTimeout(() => {
+      controller.abort();
+    }, config.downloads.requestTimeoutMs);
+
+    let remoteResponse;
+    try {
+      remoteResponse = await fetch(targetUrl, {
+        headers,
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(headerTimeout);
+    }
 
     if (!remoteResponse.ok && remoteResponse.status !== 206) {
       throw new Error(`Failed to stream preview asset: ${remoteResponse.status} ${targetUrl}`);
@@ -563,12 +597,35 @@ async function createApp() {
     }
 
     response.writeHead(remoteResponse.status, responseHeaders);
-    if (remoteResponse.body) {
-      Readable.fromWeb(remoteResponse.body).pipe(response);
+    if (!remoteResponse.body) {
+      response.end();
       return;
     }
 
-    response.end();
+    let streamCompleted = false;
+    const abortRemoteStream = () => {
+      if (!streamCompleted && !response.writableEnded) {
+        controller.abort();
+      }
+    };
+
+    response.once('close', abortRemoteStream);
+
+    try {
+      await pipeline(Readable.fromWeb(remoteResponse.body), response);
+      streamCompleted = true;
+    } catch (error) {
+      if (!isExpectedStreamAbort(error, response)) {
+        console.error('Preview asset stream failed:', error);
+      }
+
+      if (!response.destroyed && !response.writableEnded) {
+        response.destroy();
+      }
+    } finally {
+      streamCompleted = true;
+      response.off('close', abortRemoteStream);
+    }
   }
 
   async function handleState(url, response) {
@@ -910,7 +967,9 @@ async function createApp() {
 
   async function handlePreviewPlay(url, request, response) {
     const item = buildPreviewItem(url);
-    const source = await resolvePreviewSource(item);
+    const forceRefresh = url.searchParams.get('refresh') === '1';
+    const previewSession = String(url.searchParams.get('_preview') || '');
+    const source = await resolvePreviewSource(item, { forceRefresh });
     const refererUrl = source.detailUrl || item.detailUrl || config.ranking.referer;
 
     if (source.type !== 'hls') {
@@ -926,7 +985,7 @@ async function createApp() {
       manifestText = await fetchPreviewText(manifestUrl, refererUrl);
     }
 
-    const rewrittenPlaylist = rewriteMediaPlaylist(manifestUrl, manifestText, request, refererUrl);
+    const rewrittenPlaylist = rewriteMediaPlaylist(manifestUrl, manifestText, request, refererUrl, previewSession);
     response.writeHead(200, {
       'Cache-Control': 'no-store',
       'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8'
@@ -936,9 +995,14 @@ async function createApp() {
 
   async function handlePreviewInfo(url, response) {
     const item = buildPreviewItem(url);
-    const source = await resolvePreviewSource(item);
+    const forceRefresh = url.searchParams.get('refresh') === '1';
+    const previewSession = String(url.searchParams.get('_preview') || Date.now());
+    const source = await resolvePreviewSource(item, { forceRefresh });
     sendJson(response, 200, {
-      playbackUrl: `/api/preview/play?${buildPreviewPlaybackParams(item).toString()}`,
+      playbackUrl: `/api/preview/play?${buildPreviewPlaybackParams(item, {
+        forceRefresh,
+        session: previewSession
+      }).toString()}`,
       type: source.type || 'direct'
     });
   }
@@ -1051,6 +1115,12 @@ async function createApp() {
 
       sendText(response, 405, '許可されていないHTTPメソッドです。');
     } catch (error) {
+      if (response.headersSent) {
+        if (!response.destroyed) {
+          response.destroy(error);
+        }
+        return;
+      }
       sendJson(response, 500, {
         error: error.message
       });
