@@ -76,6 +76,14 @@ Vercel hosted mode の成功パターンは次の通り。
 - 対策: hosted FANZA `litevideo` では `html5_player` HTMLを取得し、`bitrates` から `FullHD (1080p)` の `...hhb.mp4` を抽出して `type: "direct"` として返す。
 - これにより、ブラウザの `<video>` が最初から FullHD mp4 を再生する。DMM iframe は抽出失敗時のフォールバックとしてのみ使う。
 
+## 2026-04-26 追加試行ログ - 複数再生の音声フォーカス
+
+- ユーザー報告: Vercel 版の女優検索後の複数再生で、カードレイアウト上で選択していない動画の音声も同時に出る。
+- ベンチマーク: ダウンロード候補画面は `activeInlinePreviewAudioKey` を基準に、アクティブなプレビューカード1枚だけ `muted=false` にする仕様。
+- 原因整理: 女優検索側も同じ仕組みを使っているが、hosted FANZA を direct mp4 化したことで複数 `<video>` が同時に autoplay し、読み込み完了やユーザー操作のタイミングで `muted` 状態が崩れる余地があった。
+- 対策: `play` / `playing` / `loadeddata` / `canplay` / `volumechange` の各イベントで音声フォーカスを再同期する。
+- 非アクティブカードで `volumechange` が起きて `muted=false` になった場合は即座に `muted=true` へ戻す。これにより、選択中カードレイヤーの動画1つだけが音声出力される。
+
 ## 調査コマンド
 
 直近の本番エラー確認:

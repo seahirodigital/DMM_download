@@ -1240,23 +1240,35 @@ function ensureInlinePreviewAudioFocus(keys) {
   }
 }
 
+function syncInlinePreviewCardAudio(card) {
+  const key = card.dataset.inlinePreviewCardKey;
+  const video = card.querySelector('[data-inline-preview-video]');
+  const isActive = Boolean(key && key === state.activeInlinePreviewAudioKey);
+  card.classList.toggle('inline-preview-card-active-audio', isActive);
+  if (!video) {
+    return;
+  }
+
+  const canEnableAudio = isActive && !video.paused && !video.ended && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+  video.muted = !canEnableAudio;
+  video.defaultMuted = !canEnableAudio;
+}
+
 function applyInlinePreviewAudioFocus() {
   const previewCards = [...document.querySelectorAll('[data-inline-preview-card-key]')];
   const visibleKeys = previewCards.map((card) => card.dataset.inlinePreviewCardKey).filter(Boolean);
   ensureInlinePreviewAudioFocus(visibleKeys);
 
-  previewCards.forEach((card) => {
-    const key = card.dataset.inlinePreviewCardKey;
-    const video = card.querySelector('[data-inline-preview-video]');
-    const isActive = Boolean(key && key === state.activeInlinePreviewAudioKey);
-    card.classList.toggle('inline-preview-card-active-audio', isActive);
-    if (!video) {
-      return;
-    }
+  previewCards.forEach(syncInlinePreviewCardAudio);
+}
 
-    const canEnableAudio = isActive && !video.paused && !video.ended && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
-    video.muted = !canEnableAudio;
-    video.defaultMuted = !canEnableAudio;
+function scheduleInlinePreviewAudioFocusSync(repeatCount = 2) {
+  const repeat = Math.max(1, Number(repeatCount) || 1);
+  window.requestAnimationFrame(() => {
+    applyInlinePreviewAudioFocus();
+    if (repeat > 1) {
+      window.setTimeout(() => scheduleInlinePreviewAudioFocusSync(repeat - 1), 150);
+    }
   });
 }
 
@@ -1274,10 +1286,25 @@ function bindInlinePreviewAudioFocus(container) {
 
     card.addEventListener('pointerdown', activate);
     card.addEventListener('click', activate);
-    card.querySelector('[data-inline-preview-video]')?.addEventListener('play', activate);
+    const video = card.querySelector('[data-inline-preview-video]');
+    if (video) {
+      const enforceFocus = () => scheduleInlinePreviewAudioFocusSync(2);
+      const enforceMutedForInactiveCard = () => {
+        const key = card.dataset.inlinePreviewCardKey;
+        if (key && key !== state.activeInlinePreviewAudioKey && !video.muted) {
+          video.muted = true;
+          video.defaultMuted = true;
+        }
+      };
+      video.addEventListener('play', activate);
+      video.addEventListener('playing', enforceFocus);
+      video.addEventListener('loadeddata', enforceFocus);
+      video.addEventListener('canplay', enforceFocus);
+      video.addEventListener('volumechange', enforceMutedForInactiveCard);
+    }
   });
 
-  applyInlinePreviewAudioFocus();
+  scheduleInlinePreviewAudioFocusSync(3);
 }
 
 async function attachPreviewSource(video, item, options = {}) {
