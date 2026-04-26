@@ -164,6 +164,15 @@ function sanitizeUrlForLog(value) {
   }
 }
 
+function isLitevideoPlaybackPageUrl(value) {
+  try {
+    const url = new URL(value);
+    return /^https?:$/i.test(url.protocol) && /(?:^|\.)dmm\.co\.jp$/i.test(url.hostname) && /\/litevideo\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function isExpectedStreamAbort(error, response) {
   const code = error?.code || error?.cause?.code;
   return (
@@ -989,10 +998,24 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || '');
+    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
+      response.writeHead(302, {
+        'Cache-Control': 'no-store',
+        Location: item.playbackUrl
+      });
+      response.end();
+      return;
+    }
+
     const source = await resolvePreviewSource(item, { forceRefresh });
     const refererUrl = source.detailUrl || item.detailUrl || config.ranking.referer;
 
     if (hosted) {
+      if (source.type !== 'hls') {
+        await proxyPreviewAsset(source.url, refererUrl, request, response);
+        return;
+      }
+
       response.writeHead(302, {
         'Cache-Control': 'no-store',
         Location: source.url
@@ -1026,6 +1049,21 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || Date.now());
+    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
+      sendJson(response, 200, {
+        playbackUrl: item.playbackUrl,
+        type: 'iframe'
+      });
+      return;
+    }
+
+    if (hosted && !item.seasonId && !item.playbackUrl) {
+      sendJson(response, 400, {
+        error: 'Hosted preview requires a sample playback URL for actress search results.'
+      });
+      return;
+    }
+
     const source = await resolvePreviewSource(item, { forceRefresh });
     const proxiedPlaybackUrl = `/api/preview/play?${buildPreviewPlaybackParams(item, {
       forceRefresh,
@@ -1033,7 +1071,7 @@ async function createApp() {
     }).toString()}`;
 
     sendJson(response, 200, {
-      playbackUrl: hosted ? source.url : proxiedPlaybackUrl,
+      playbackUrl: hosted && source.type === 'hls' ? source.url : proxiedPlaybackUrl,
       type: source.type || 'direct'
     });
   }

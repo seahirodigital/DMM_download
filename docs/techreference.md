@@ -82,3 +82,12 @@ Vercelログ上で `/api/preview/play` が `cc3001.dmm.co.jp/.../playlist.m3u8` 
 - User report: DMM/ranking side is OK, but actress search must return FANZA results and allow multi-select playback.
 - Previous attempt `71efdb0`: TV GraphQL was made first priority to avoid detail-page-only affiliate failures. This conflicts with the new requirement because it suppresses FANZA/affiliate results.
 - New direction: restore affiliate/FANZA-first actress search, prioritize FANZA ItemList targets, and keep only items with usable `sampleMovieURL`/`playbackUrl` so selected search results can be previewed.
+
+## 2026-04-26 attempt log - Vercel FANZA preview still black
+
+- User report after `d971bb1`: local playback works, but Vercel actress-search multi-preview remains black.
+- Runtime log evidence: production still emitted `/api/preview/info` errors around 17:45 JST: "detail page" video URL extraction failed.
+- Real local data check: FANZA ItemList results do include `playbackUrl`, but it is a DMM `www.dmm.co.jp/litevideo/...` player page, not a final media URL.
+- Local behavior: `resolvePlayableSource` can fetch and parse the litevideo page, then extracts a `cc3001.dmm.co.jp/...mp4` source.
+- Vercel difference: hosted server-side litevideo parsing can fail and falls through to detail-page scraping, which then fails. This is the black-screen path.
+- New fix direction: in hosted mode, do not server-parse FANZA `litevideo` pages. Return them as `type: iframe` so the browser embeds the DMM litevideo player directly. For hosted direct media, use `/api/preview/play` proxy; keep HLS direct because Vercel server-side HLS manifest fetching previously returned 403.
