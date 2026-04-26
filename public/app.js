@@ -1079,6 +1079,26 @@ function bumpInlinePreviewToken(kind) {
   return state[stateKey];
 }
 
+function getInlinePreviewAttachConcurrency() {
+  return isHostedMode() ? 2 : 4;
+}
+
+async function runInlinePreviewAttachQueue(entries, worker) {
+  const queue = entries || [];
+  const concurrency = Math.max(1, Math.min(queue.length || 1, getInlinePreviewAttachConcurrency()));
+  let nextIndex = 0;
+
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      while (nextIndex < queue.length) {
+        const entry = queue[nextIndex];
+        nextIndex += 1;
+        await worker(entry);
+      }
+    })
+  );
+}
+
 function isInlinePreviewMountCurrent(kind, token, video) {
   return currentInlinePreviewToken(kind) === token && (!video || video.isConnected);
 }
@@ -1337,6 +1357,7 @@ async function attachPreviewSource(video, item, options = {}) {
   }
 
   resetVideoElement(video);
+  video.crossOrigin = 'use-credentials';
   video.muted = Boolean(muted);
   video.defaultMuted = Boolean(muted);
   const sourceToken = nextPreviewSourceToken();
@@ -1439,7 +1460,10 @@ async function attachPreviewSource(video, item, options = {}) {
     }
 
     const hls = new window.Hls({
-      enableWorker: true
+      enableWorker: true,
+      xhrSetup: (xhr) => {
+        xhr.withCredentials = true;
+      }
     });
 
     hls.on(window.Hls.Events.MEDIA_ATTACHED, () => {
@@ -2176,8 +2200,9 @@ async function mountFavoriteInlinePreviews(items, mountToken = currentInlinePrev
     }
   }
 
-  await Promise.all(
-    videoElements.map(async (video) => {
+  await runInlinePreviewAttachQueue(
+    videoElements,
+    async (video) => {
       const key = video.dataset.inlinePreviewKey;
       const item = itemMap.get(key);
       const status = elements.favoritesContent.querySelector(`[data-inline-preview-status="${CSS.escape(key)}"]`);
@@ -2218,7 +2243,7 @@ async function mountFavoriteInlinePreviews(items, mountToken = currentInlinePrev
         status.textContent = '読み込み失敗';
         showMessage(error.message, 'error');
       }
-    })
+    }
   );
 
   if (!isInlinePreviewMountCurrent('favorites', mountToken)) {
@@ -2268,8 +2293,9 @@ async function mountDashboardInlinePreviews(items, mountToken = currentInlinePre
     }
   }
 
-  await Promise.all(
-    videoElements.map(async (video) => {
+  await runInlinePreviewAttachQueue(
+    videoElements,
+    async (video) => {
       const key = video.dataset.inlinePreviewKey;
       const item = itemMap.get(key);
       const status = elements.dashboardRanking.querySelector(`[data-inline-preview-status="${CSS.escape(key)}"]`);
@@ -2310,7 +2336,7 @@ async function mountDashboardInlinePreviews(items, mountToken = currentInlinePre
         status.textContent = '読み込み失敗';
         showMessage(error.message, 'error');
       }
-    })
+    }
   );
 
   if (!isInlinePreviewMountCurrent('dashboard', mountToken)) {
@@ -2372,8 +2398,9 @@ async function mountSearchInlinePreviews(items, mountToken = currentInlinePrevie
     }
   }
 
-  await Promise.all(
-    videoElements.map(async (video) => {
+  await runInlinePreviewAttachQueue(
+    videoElements,
+    async (video) => {
       const key = video.dataset.inlinePreviewKey;
       const item = itemMap.get(key);
       const status = elements.searchResults.querySelector(`[data-inline-preview-status="${CSS.escape(key)}"]`);
@@ -2414,7 +2441,7 @@ async function mountSearchInlinePreviews(items, mountToken = currentInlinePrevie
         status.textContent = '読み込み失敗';
         showMessage(error.message, 'error');
       }
-    })
+    }
   );
 
   if (!isInlinePreviewMountCurrent('search', mountToken)) {
