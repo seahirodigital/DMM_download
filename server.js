@@ -173,6 +173,32 @@ function isLitevideoPlaybackPageUrl(value) {
   }
 }
 
+function buildHostedLitevideoPlayerUrl(value) {
+  const url = new URL(value);
+  const cid = /\/cid=([^/]+)/i.exec(url.pathname)?.[1];
+  if (!cid) {
+    return url.toString();
+  }
+
+  const mode = /\/litevideo\/-\/([^/]+)/i.exec(url.pathname)?.[1] || 'part';
+  const affiId = /\/affi_id=([^/]+)/i.exec(url.pathname)?.[1] || url.searchParams.get('affi_id') || '';
+  const playerUrl = new URL('https://www.dmm.co.jp/service/digitalapi/-/html5_player/=/');
+  const parts = [
+    `cid=${encodeURIComponent(decodeURIComponent(cid))}`,
+    'mtype=AhRVShI_',
+    'service=litevideo',
+    `mode=${encodeURIComponent(decodeURIComponent(mode))}`,
+    'width=1920',
+    'height=1080',
+    'forceAutoPlay=1'
+  ];
+  if (affiId) {
+    parts.push(`affi_id=${encodeURIComponent(decodeURIComponent(affiId))}`);
+  }
+  playerUrl.pathname = `/service/digitalapi/-/html5_player/=/${parts.join('/')}/`;
+  return playerUrl.toString();
+}
+
 function isExpectedStreamAbort(error, response) {
   const code = error?.code || error?.cause?.code;
   return (
@@ -1001,7 +1027,7 @@ async function createApp() {
     if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
       response.writeHead(302, {
         'Cache-Control': 'no-store',
-        Location: item.playbackUrl
+        Location: buildHostedLitevideoPlayerUrl(item.playbackUrl)
       });
       response.end();
       return;
@@ -1051,7 +1077,7 @@ async function createApp() {
     const previewSession = String(url.searchParams.get('_preview') || Date.now());
     if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
       sendJson(response, 200, {
-        playbackUrl: item.playbackUrl,
+        playbackUrl: buildHostedLitevideoPlayerUrl(item.playbackUrl),
         type: 'iframe'
       });
       return;

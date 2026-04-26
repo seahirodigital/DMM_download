@@ -1,93 +1,86 @@
-# DMM動画再生まわりの技術メモ
+# DMM / FANZA プレビュー再生 技術メモ
 
-## 現象
+## 成功パターン
 
-Vercel上で女優検索結果を複数選択して再生すると、カードが黒画面になり「読み込み失敗」と表示される。
-直近では、ダウンロード候補側の複数再生にも影響が出たため、フロント側の再生変更を戻す方針にした。
+Vercel 版で女優検索後の FANZA サンプル動画を再生する場合は、ローカル版と同じ「サーバーで動画URLを抽出して `<video>` に流す」方式に寄せすぎない。
 
-## 確認したこと
+ローカルでは `www.dmm.co.jp/litevideo/...` をサーバーで取得し、内部の `html5_player` から `cc3001.dmm.co.jp/...mp4` を抽出して再生できる。一方、Vercel の Serverless Function から同じ解析を行うと、DMM 側の応答差分や CDN 403 により失敗しやすく、最終的に detail page 抽出へ落ちて黒画面になる。
 
-- `DMM_COOKIE_HEADER` は Vercel の Production / Preview に設定済みだった。
-- 最新Productionデプロイは Ready だった。
-- Vercelログでは `/api/preview/info` が 500 になっていた。
-- 代表的なエラーは「再生用動画URLを見つけられませんでした」だった。
-- `/api/preview/play` や `/api/preview/asset` に到達する前に、サーバー側の動画URL解決で失敗していた。
+Vercel hosted mode の成功パターンは次の通り。
 
-## これまで入れた変更
+- 女優検索は FANZA Affiliate ItemList を優先する。
+- `sampleMovieURL` がある項目だけを再生候補に残す。
+- FANZA の `www.dmm.co.jp/litevideo/...` は、Vercel サーバーで最終メディアURLへ解析しない。
+- hosted mode では `litevideo` を DMM の内側プレイヤー `https://www.dmm.co.jp/service/digitalapi/-/html5_player/...` に変換し、`iframe` として表示する。
+- `html5_player` には `width=1920` / `height=1080` / `forceAutoPlay=1` を付ける。
+- HLS のランキング系プレビューは、Vercel サーバーで manifest を取りに行くと 403 になるため、hosted mode では DMM の HLS URL をブラウザへ直接返す。
+- direct mp4 など HLS 以外のメディアは、必要に応じて `/api/preview/play` でプロキシする。
 
-- Hosted mode でもDMM実URLをブラウザへ直接返さず、`/api/preview/play` を返すようにした。
-- HLSマニフェスト内のセグメントURLを `/api/preview/asset` に書き換えるようにした。
-- Cookie未設定時に `age_check_done=1` だけで「Cookieあり」と誤判定しないようにした。
-- `vercel.json` を追加し、API Function の `maxDuration` を60秒にした。
+## 重要な実装ポイント
 
-## 戻した変更
+`/api/preview/info` の hosted mode 分岐で、`seasonId` がなく `playbackUrl` が `litevideo` の場合は `resolvePlayableSource()` に進ませない。ここで進ませると Vercel 側で litevideo 解析に失敗し、detail page スクレイピングへ落ちる。
 
-以下はダウンロード候補側の再生まで壊す可能性があるため戻した。
+代わりに次のようなレスポンスを返す。
 
-- `<video>` への `crossOrigin = 'use-credentials'`
-- hls.js の `xhr.withCredentials = true`
-- 複数プレビュー初期化の独自キュー化
+```json
+{
+  "type": "iframe",
+  "playbackUrl": "https://www.dmm.co.jp/service/digitalapi/-/html5_player/=/cid=.../mtype=AhRVShI_/service=litevideo/mode=part/width=1920/height=1080/forceAutoPlay=1/affi_id=.../"
+}
+```
 
-同一オリジンの `/api/preview/*` を使う設計では、ブラウザ側でDMM Cookieを送らせる必要はない。
-Cookieはサーバー側の upstream fetch だけに付与する。
+フロント側は `type: "iframe"` を受けたら `<video>` を隠し、同じプレイヤー枠内に `<iframe allow="autoplay; fullscreen; picture-in-picture">` を追加する。
 
-## 現時点の原因整理
+## これまでの失敗パターン
 
-女優検索はAffiliate APIの結果を使うことがある。
-Affiliate APIの商品には、`sampleMovieURL` があるものと無いものが混在する。
+1. Vercel で HLS manifest / segment をサーバープロキシした。
+   - `/api/preview/play` が `cc3001.dmm.co.jp/.../playlist.m3u8` を取得しようとして 403。
+   - ランキング側の複数再生まで壊れた。
 
-以前は `detailUrl` があるだけで「プレビュー可能」と判定していたため、サンプル動画URLが無い商品でも再生対象になっていた。
-その場合 `/api/preview/info` は詳細ページHTMLから動画URLを探しに行くが、Vercel上では抽出できず失敗する。
+2. 女優検索を DMM TV GraphQL 優先にした。
+   - ランキングと同じ `seasonId` 付き結果にはなるが、ユーザー要件の FANZA 結果ではなくなる。
+   - FANZA の検索結果を見たい用途に合わない。
 
-つまり、黒画面の主因は「再生可能でない検索結果を再生対象として扱っていたこと」。
+3. FANZA の `litevideo` を Vercel サーバーで解析しようとした。
+   - ローカルでは成功するが、Vercel では `/api/preview/info` が detail page 抽出へ落ちて失敗。
+   - エラー例: `「the detail page」の再生用動画URLを見つけられませんでした。`
 
-ランキング側では別の原因も確認した。
-Vercelログ上で `/api/preview/play` が `cc3001.dmm.co.jp/.../playlist.m3u8` を取得しようとして 403 になっていた。
-これはVercelサーバーからDMM CDNのHLSマニフェストを取りに行くプロキシ方式が拒否されている状態。
-以前うまく動いていたHosted再生は、サーバーでHLSを中継せず、解決したDMMの再生URLをブラウザへ直接返す方式だった。
+4. 外側の `www.dmm.co.jp/litevideo/...` ページをそのまま iframe にした。
+   - 再生はできるが、内部 iframe が `width=476 height=306` 固定で生成される。
+   - 黒い枠の中でプレイヤーが小さく表示される。
+   - 画質も低く見えやすく、自動再生も安定しない。
 
-## 今回の対策
+## 現在の対策
 
-女優検索結果の再生可能判定を以下に絞る。
+- `buildHostedLitevideoPlayerUrl()` で `litevideo` URL から `cid` / `mode` / `affi_id` を取り出し、直接 `html5_player` URLを組み立てる。
+- `width=1920` / `height=1080` を指定し、プレイヤー初期表示を大きくする。
+- `forceAutoPlay=1` を指定し、複数選択後の一括再生で iframe 側も再生開始しやすくする。
+- プレイヤー枠の CSS は `position: relative`、iframe は `position: absolute; inset: 0; width: 100%; height: 100%` にして、枠いっぱいに表示する。
 
-- `seasonId` があるDMM TV GraphQL由来の項目
-- `playbackUrl` があるAffiliateサンプル動画付きの項目
+## 2026-04-26 追加試行ログ
 
-`detailUrl` だけの項目は再生対象にしない。
-これにより、再生不能な商品を複数再生に含めて `/api/preview/info` で失敗する流れを止める。
+- 外側の `litevideo` ページを iframe にすると、再生はできても内側プレイヤーが `476x306` 固定で生成されるため、黒い余白が大きく残った。
+- `html5_player` へ直接変換し、`width=1920` / `height=1080` を付けた場合、プレイヤー設定上の `height` は `1080px` になり、ビットレート候補にも `FullHD (1080p)` が先頭で含まれる。
+- `forceAutoPlay=1` を付けると、プレイヤー設定の `autoPlay` が `true` になる。
+- `muted=1` / `mute=1` / `volume=0` / `forceMuted=1` / `playMuted=1` も試したが、プレイヤー設定の `muted` は `false` のままで変わらなかった。そのためミュート指定は採用せず、`iframe allow="autoplay; fullscreen; picture-in-picture"` と `forceAutoPlay=1` の組み合わせで一括再生を成立させる。
+- hosted mode の `/api/preview/info` と `/api/preview/play` は、どちらも `html5_player` URL に `width=1920` / `height=1080` / `forceAutoPlay=1` / `affi_id` が含まれることをローカルで確認済み。
 
-ランキング側はHosted modeで以下の挙動へ戻す。
+## 調査コマンド
 
-- `/api/preview/info` は `source.url` をそのまま返す
-- `/api/preview/play` は `source.url` へ302リダイレクトする
-- HLSマニフェスト/セグメントのサーバープロキシはHostedでは使わない
+直近の本番エラー確認:
 
-ローカル/desktop modeでは従来どおり `/api/preview/play` と `/api/preview/asset` のプロキシを使える。
+```powershell
+npx.cmd vercel logs --environment production --since 30m --level error --expand --no-branch
+```
 
-## 次に見るべきログ
+最新デプロイ確認:
 
-まだ失敗する場合は、Vercelログで以下を確認する。
+```powershell
+npx.cmd vercel ls dmm-download
+```
 
-- `/api/preview/info` が失敗しているか
-- `/api/preview/play` が失敗しているか
-- `/api/preview/asset` が失敗しているか
+ローカルで FANZA 検索結果の `playbackUrl` を確認:
 
-`/api/preview/info` の失敗なら動画URL解決の問題。
-`/api/preview/play` / `/api/preview/asset` の失敗ならHLSまたはメディアプロキシの問題。
-## 2026-04-26 attempt log - actress search / multi-select
-
-- User report: Vercel ranking/download multi-select opens a new tab when a thumbnail is clicked. Desired behavior is that thumbnail clicks toggle the checkbox while selection mode is active.
-- Evidence in code: `bindRankingCardActions` only intercepted thumbnail links for `favorite` and `search`; `download` selection links fell through to the anchor.
-- Fix attempt: include `download` in the intercepted selection kinds and explicitly update the matching checkbox/label state after toggling `selectedDownloadKeys`.
-- User report: DMM/ranking side is OK, but actress search must return FANZA results and allow multi-select playback.
-- Previous attempt `71efdb0`: TV GraphQL was made first priority to avoid detail-page-only affiliate failures. This conflicts with the new requirement because it suppresses FANZA/affiliate results.
-- New direction: restore affiliate/FANZA-first actress search, prioritize FANZA ItemList targets, and keep only items with usable `sampleMovieURL`/`playbackUrl` so selected search results can be previewed.
-
-## 2026-04-26 attempt log - Vercel FANZA preview still black
-
-- User report after `d971bb1`: local playback works, but Vercel actress-search multi-preview remains black.
-- Runtime log evidence: production still emitted `/api/preview/info` errors around 17:45 JST: "detail page" video URL extraction failed.
-- Real local data check: FANZA ItemList results do include `playbackUrl`, but it is a DMM `www.dmm.co.jp/litevideo/...` player page, not a final media URL.
-- Local behavior: `resolvePlayableSource` can fetch and parse the litevideo page, then extracts a `cc3001.dmm.co.jp/...mp4` source.
-- Vercel difference: hosted server-side litevideo parsing can fail and falls through to detail-page scraping, which then fails. This is the black-screen path.
-- New fix direction: in hosted mode, do not server-parse FANZA `litevideo` pages. Return them as `type: iframe` so the browser embeds the DMM litevideo player directly. For hosted direct media, use `/api/preview/play` proxy; keep HLS direct because Vercel server-side HLS manifest fetching previously returned 403.
+```powershell
+node -e "/* fetchActressSearch で result.items[].playbackUrl を確認 */"
+```
