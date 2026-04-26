@@ -41,6 +41,7 @@ const state = {
     sourcePageUrl: '',
     total: 0
   },
+  searchDraft: null,
   selectedDownloadKeys: new Set(),
   selectedFavoriteKeys: new Set(),
   selectedSearchKeys: new Set(),
@@ -652,6 +653,7 @@ function renderSummary() {
 function renderActressSearchForm(options = {}) {
   const { extraClass = '', idPrefix = '' } = options;
   const prefix = idPrefix ? `${idPrefix}-` : '';
+  const inputValue = state.searchDraft ?? state.search.query;
   return `
     <form id="${prefix}actress-search-form" class="header-search-form ${escapeHtml(extraClass)}" data-actress-search-form>
       <label class="header-control header-search-control">
@@ -662,15 +664,48 @@ function renderActressSearchForm(options = {}) {
           type="search"
           autocomplete="off"
           data-actress-search-input
-          value="${escapeHtml(state.search.query)}"
+          value="${escapeHtml(inputValue)}"
           placeholder="女優名で検索"
         />
       </label>
-      <button class="header-command-button" type="submit" ${state.search.loading ? 'disabled' : ''}>
-        ${state.search.loading ? '検索中' : '検索'}
+      <button class="header-command-button actress-search-submit" type="submit" title="Search" aria-label="Search actress" ${state.search.loading ? 'disabled' : ''}>
+        <span aria-hidden="true">${state.search.loading ? '&hellip;' : '&#128269;'}</span>
       </button>
     </form>
   `;
+}
+
+function captureActressSearchFocus(scope = document) {
+  const active = document.activeElement;
+  if (!active?.matches?.('[data-actress-search-input]') || (scope && !scope.contains(active))) {
+    return null;
+  }
+
+  return {
+    id: active.id,
+    selectionDirection: active.selectionDirection || 'none',
+    selectionEnd: active.selectionEnd,
+    selectionStart: active.selectionStart
+  };
+}
+
+function restoreActressSearchFocus(snapshot) {
+  if (!snapshot?.id) {
+    return;
+  }
+
+  const input = qs(snapshot.id);
+  if (!input) {
+    return;
+  }
+
+  input.focus({ preventScroll: true });
+  if (typeof input.setSelectionRange === 'function') {
+    const fallbackPosition = input.value.length;
+    const selectionStart = Math.min(snapshot.selectionStart ?? fallbackPosition, input.value.length);
+    const selectionEnd = Math.min(snapshot.selectionEnd ?? selectionStart, input.value.length);
+    input.setSelectionRange(selectionStart, selectionEnd, snapshot.selectionDirection);
+  }
 }
 
 function syncActressSearchInputs(value, sourceInput = null) {
@@ -685,6 +720,7 @@ function bindActressSearchForms(root = document) {
   root.querySelectorAll('[data-actress-search-form]').forEach((form) => {
     const input = form.querySelector('[data-actress-search-input]');
     input?.addEventListener('input', () => {
+      state.searchDraft = input.value;
       state.controlsDirty = true;
       syncActressSearchInputs(input.value, input);
     });
@@ -696,8 +732,10 @@ function bindActressSearchForms(root = document) {
 }
 
 function renderSearchHeaderActions() {
+  const focusSnapshot = captureActressSearchFocus(elements.headerActions);
   elements.headerActions.innerHTML = renderActressSearchForm();
   bindActressSearchForms(elements.headerActions);
+  restoreActressSearchFocus(focusSnapshot);
 }
 
 function renderHeaderActions() {
@@ -1969,6 +2007,7 @@ function renderSearchResults() {
       })}
     </div>
   `;
+  const focusSnapshot = captureActressSearchFocus(elements.searchResults);
 
   renderRankingSection(elements.searchResults, {
     beforeHtml: mobileSearchFormHtml,
@@ -2010,6 +2049,7 @@ function renderSearchResults() {
     items: searchItems,
     onAfterRender: () => {
       bindActressSearchForms(elements.searchResults);
+      restoreActressSearchFocus(focusSnapshot);
       elements.searchResults?.querySelectorAll('[data-search-selection-toggle]').forEach((button) => {
         button.addEventListener('click', () => {
           toggleSearchSelectionMode();
@@ -3088,7 +3128,7 @@ async function searchActress(queryOverride = null) {
     document.activeElement?.matches?.('[data-actress-search-input]')
       ? document.activeElement
       : document.querySelector('[data-actress-search-input]');
-  const queryValue = queryOverride === null ? input?.value || state.search.query || '' : queryOverride;
+  const queryValue = queryOverride === null ? (input?.value ?? state.searchDraft ?? state.search.query ?? '') : queryOverride;
   const actress = String(queryValue || '').trim();
   if (!actress) {
     showMessage('検索する女優名を入力してください。', 'error');
@@ -3104,6 +3144,7 @@ async function searchActress(queryOverride = null) {
     query: actress,
     total: 0
   };
+  state.searchDraft = actress;
   state.activeSearchPreviewKeys = [];
   state.selectedSearchKeys.clear();
   state.searchSelectionMode = false;

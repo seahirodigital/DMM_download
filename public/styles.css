@@ -94,6 +94,8 @@ a:hover {
   background: rgba(255, 255, 255, 0.12);
   cursor: pointer;
   padding: 0;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 
 .mobile-menu-button span {
@@ -181,6 +183,10 @@ a:hover {
   min-width: 0;
 }
 
+.header-search-form .header-search-control {
+  flex: 1 1 auto;
+}
+
 .header-control {
   display: inline-flex;
   align-items: center;
@@ -222,12 +228,18 @@ a:hover {
   border-radius: var(--pill-radius);
 }
 
+.header-search-form .header-search-input {
+  width: 100%;
+  min-width: 0;
+}
+
 .search-mobile-panel {
   display: none;
 }
 
 .search-mobile-panel .header-search-form {
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 10px;
 }
 
@@ -253,8 +265,10 @@ a:hover {
 }
 
 .search-mobile-panel .header-command-button {
-  width: 100%;
-  border-radius: 12px;
+  flex: 0 0 42px;
+  width: 42px;
+  min-width: 42px;
+  border-radius: 50%;
 }
 
 .header-command-button {
@@ -272,6 +286,24 @@ a:hover {
     color 0.2s ease,
     transform 0.2s ease,
     border-color 0.2s ease;
+}
+
+.actress-search-submit {
+  display: inline-flex;
+  flex: 0 0 42px;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.header-search-form .actress-search-submit {
+  padding: 0;
 }
 
 .header-command-button:hover {
@@ -1941,22 +1973,25 @@ tbody tr:hover {
 
 @media (max-width: 1180px), (hover: none) and (pointer: coarse) {
   .topbar {
-    position: static;
+    position: fixed;
     top: 0;
-    z-index: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
     min-height: 0;
     height: 0;
     padding: 0;
     background: transparent;
     box-shadow: none;
     overflow: visible;
+    pointer-events: none;
   }
 
   .mobile-menu-button {
     position: fixed;
     top: 8px;
     left: 8px;
-    z-index: 45;
+    z-index: 101;
     display: inline-flex;
     flex: 0 0 auto;
     background: rgba(30, 57, 50, 0.92);
@@ -2012,7 +2047,8 @@ tbody tr:hover {
   }
 
   .mobile-sidebar-actions .header-search-form {
-    display: grid;
+    display: flex;
+    align-items: center;
     gap: 10px;
     width: 100%;
   }
@@ -2029,11 +2065,18 @@ tbody tr:hover {
     width: 78px;
   }
 
-  .mobile-sidebar-actions .header-command-button,
+  .mobile-sidebar-actions .header-command-button:not(.actress-search-submit),
   .mobile-sidebar-actions .icon-button {
     width: 100%;
     min-height: 42px;
     border-radius: 12px;
+  }
+
+  .mobile-sidebar-actions .actress-search-submit {
+    flex: 0 0 42px;
+    width: 42px;
+    min-width: 42px;
+    border-radius: 50%;
   }
 
   .search-mobile-panel {
