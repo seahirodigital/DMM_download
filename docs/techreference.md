@@ -116,3 +116,19 @@ hosted FANZA `litevideo` が FullHD mp4 を返すことの確認:
 $env:APP_MODE='hosted'
 node -e "/* /api/preview/info が type=direct かつ ...hhb.mp4 を返すことを確認 */"
 ```
+
+## Vercel 版スマホレイアウトの成功パターン
+
+Vercel 版のスマホ表示では、タブを女優検索へ切り替えるとモバイルメニューが閉じる。検索フォームをヘッダーアクションだけに置くと、スマホではフォームがサイドメニュー側へ退避され、画面本体から女優名を入力できない状態になる。
+
+成功パターンは、検索フォームを共通コンポーネント化し、ヘッダー用と検索画面本体用の両方に描画すること。入力イベントでは `data-actress-search-input` を持つ全フォームの値を同期し、送信時は押されたフォームの入力値を `searchActress()` に渡す。空欄送信時に前回検索語へフォールバックしないよう、明示的に渡された空文字は空文字として扱う。
+
+検索結果のカード配置は、ダウンロード候補・お気に入りと同じ `ranking-grid` を使い、スマホ幅では `grid-auto-flow: column` と `overflow-x: auto` にする。これにより縦に詰まったカード一覧ではなく、横スワイプでサムネイルを確認できる UI になる。
+
+今回の実装ポイント:
+
+- `public/app.js` の `renderActressSearchForm()` で女優検索フォームを共通化する。
+- `renderSearchResults()` の `beforeHtml` にスマホ用検索フォームを差し込む。
+- `rankingSectionSignature()` に `beforeHtmlSignature` を含め、検索語や loading 状態の変化でフォームも再描画されるようにする。
+- `public/styles.css` で `#search-results.section-block` をダウンロード候補と同じ透明セクション扱いにする。
+- `@media (max-width: 820px)` では `.ranking-grid` を横スワイプ表示に統一する。

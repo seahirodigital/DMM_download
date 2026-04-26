@@ -649,33 +649,55 @@ function renderSummary() {
   `;
 }
 
-function renderSearchHeaderActions() {
-  elements.headerActions.innerHTML = `
-    <form id="actress-search-form" class="header-search-form">
+function renderActressSearchForm(options = {}) {
+  const { extraClass = '', idPrefix = '' } = options;
+  const prefix = idPrefix ? `${idPrefix}-` : '';
+  return `
+    <form id="${prefix}actress-search-form" class="header-search-form ${escapeHtml(extraClass)}" data-actress-search-form>
       <label class="header-control header-search-control">
         <span>女優名</span>
         <input
-          id="actress-search-input"
+          id="${prefix}actress-search-input"
           class="text-input header-search-input"
           type="search"
           autocomplete="off"
+          data-actress-search-input
           value="${escapeHtml(state.search.query)}"
           placeholder="女優名で検索"
         />
       </label>
-      <button id="header-actress-search-button" class="header-command-button" type="submit" ${state.search.loading ? 'disabled' : ''}>
+      <button class="header-command-button" type="submit" ${state.search.loading ? 'disabled' : ''}>
         ${state.search.loading ? '検索中' : '検索'}
       </button>
     </form>
   `;
+}
 
-  qs('actress-search-form')?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    searchActress();
+function syncActressSearchInputs(value, sourceInput = null) {
+  document.querySelectorAll('[data-actress-search-input]').forEach((input) => {
+    if (input !== sourceInput) {
+      input.value = value;
+    }
   });
-  qs('actress-search-input')?.addEventListener('input', () => {
-    state.controlsDirty = true;
+}
+
+function bindActressSearchForms(root = document) {
+  root.querySelectorAll('[data-actress-search-form]').forEach((form) => {
+    const input = form.querySelector('[data-actress-search-input]');
+    input?.addEventListener('input', () => {
+      state.controlsDirty = true;
+      syncActressSearchInputs(input.value, input);
+    });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      searchActress(input?.value || '');
+    });
   });
+}
+
+function renderSearchHeaderActions() {
+  elements.headerActions.innerHTML = renderActressSearchForm();
+  bindActressSearchForms(elements.headerActions);
 }
 
 function renderHeaderActions() {
@@ -1506,6 +1528,7 @@ function rankingSectionSignature(options) {
   const selectedKeys = options.selectedKeys || new Set();
   return JSON.stringify({
     allowDownloadSelection: Boolean(options.allowDownloadSelection),
+    beforeHtmlSignature: options.beforeHtmlSignature || '',
     downloadSelectionMode: state.downloadSelectionMode,
     emptyText: options.emptyText,
     eyebrow: options.eyebrow,
@@ -1563,6 +1586,7 @@ function renderRankingSection(container, options) {
   const selectedKeys = options.selectedKeys || new Set();
 
   container.innerHTML = `
+    ${options.beforeHtml || ''}
     <div class="ranking-header">
       <div>
         <p class="eyebrow">${escapeHtml(options.eyebrow)}</p>
@@ -1937,8 +1961,21 @@ function renderSearchResults() {
         </div>
       `
     : `<p class="muted">${escapeHtml(statusText)}</p>`;
+  const mobileSearchFormHtml = `
+    <div class="search-mobile-panel">
+      ${renderActressSearchForm({
+        extraClass: 'search-mobile-form',
+        idPrefix: 'mobile'
+      })}
+    </div>
+  `;
 
   renderRankingSection(elements.searchResults, {
+    beforeHtml: mobileSearchFormHtml,
+    beforeHtmlSignature: JSON.stringify({
+      loading: search.loading,
+      query: search.query
+    }),
     cacheKey: 'searchResults',
     emptyText: search.query ? '該当するコンテンツは見つかりませんでした。' : '検索キーワードを入力してください。',
     eyebrow: 'DMM検索',
@@ -1972,6 +2009,7 @@ function renderSearchResults() {
     isSelectable: isSearchPreviewable,
     items: searchItems,
     onAfterRender: () => {
+      bindActressSearchForms(elements.searchResults);
       elements.searchResults?.querySelectorAll('[data-search-selection-toggle]').forEach((button) => {
         button.addEventListener('click', () => {
           toggleSearchSelectionMode();
@@ -3045,9 +3083,13 @@ async function clearCookie() {
   }
 }
 
-async function searchActress() {
-  const input = qs('actress-search-input');
-  const actress = String(input?.value || state.search.query || '').trim();
+async function searchActress(queryOverride = null) {
+  const input =
+    document.activeElement?.matches?.('[data-actress-search-input]')
+      ? document.activeElement
+      : document.querySelector('[data-actress-search-input]');
+  const queryValue = queryOverride === null ? input?.value || state.search.query || '' : queryOverride;
+  const actress = String(queryValue || '').trim();
   if (!actress) {
     showMessage('検索する女優名を入力してください。', 'error');
     input?.focus();
