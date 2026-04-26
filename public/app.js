@@ -907,6 +907,10 @@ function buildPlaybackUrl(item) {
 function preferHighQualityPlaybackUrl(value) {
   try {
     const url = new URL(value);
+    if (/\.(m3u8|mp4|m4v|mov|webm)$/i.test(url.pathname)) {
+      return url.toString();
+    }
+
     if (!/\/litevideo\//i.test(url.pathname)) {
       return url.toString();
     }
@@ -1674,11 +1678,22 @@ function bindRankingCardActions(container, items, options = {}) {
   container.querySelectorAll('[data-card-selection-key]').forEach((link) => {
     link.addEventListener('click', (event) => {
       const kind = link.dataset.cardSelectionKind;
-      if (!options.selectionMode || (kind !== 'favorite' && kind !== 'search')) {
+      if (!options.selectionMode || !['download', 'favorite', 'search'].includes(kind)) {
         return;
       }
 
       event.preventDefault();
+      event.stopPropagation();
+      if (kind === 'download') {
+        const selectionKey = link.dataset.cardSelectionKey;
+        const nextSelected = !state.selectedDownloadKeys.has(selectionKey);
+        toggleDownloadSelection(selectionKey, nextSelected);
+        const checkbox = container.querySelector(`[data-card-select-key="${CSS.escape(selectionKey)}"]`);
+        if (checkbox) {
+          checkbox.checked = nextSelected;
+          checkbox.closest('.ranking-card-select')?.classList.toggle('active', nextSelected);
+        }
+      }
       if (kind === 'favorite') {
         toggleFavoriteSelection(link.dataset.cardSelectionKey);
       }
