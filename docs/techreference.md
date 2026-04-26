@@ -10,26 +10,26 @@ Vercel hosted mode の成功パターンは次の通り。
 
 - 女優検索は FANZA Affiliate ItemList を優先する。
 - `sampleMovieURL` がある項目だけを再生候補に残す。
-- FANZA の `www.dmm.co.jp/litevideo/...` は、Vercel サーバーで最終メディアURLへ解析しない。
-- hosted mode では `litevideo` を DMM の内側プレイヤー `https://www.dmm.co.jp/service/digitalapi/-/html5_player/...` に変換し、`iframe` として表示する。
-- `html5_player` には `width=1920` / `height=1080` / `forceAutoPlay=1` を付ける。
+- FANZA の `www.dmm.co.jp/litevideo/...` は、Vercel サーバーで外側ページや detail page をスクレイピングしない。
+- hosted mode では `litevideo` を DMM の内側プレイヤー `https://www.dmm.co.jp/service/digitalapi/-/html5_player/...` に変換し、そのHTMLから `FullHD (1080p)` の mp4 を抽出して `<video>` に直接渡す。
+- `html5_player` のURLを組み立てるときは `width=1920` / `height=1080` / `forceAutoPlay=1` を付ける。ただし、DMMプレイヤーを iframe のまま使うと初期 `src` は 576p のままになるため、FullHD固定には mp4 抽出が必要。
 - HLS のランキング系プレビューは、Vercel サーバーで manifest を取りに行くと 403 になるため、hosted mode では DMM の HLS URL をブラウザへ直接返す。
-- direct mp4 など HLS 以外のメディアは、必要に応じて `/api/preview/play` でプロキシする。
+- hosted FANZA `litevideo` から抽出した direct mp4 は、FullHDを維持するためブラウザへ直接返す。その他の direct mp4 は必要に応じて `/api/preview/play` でプロキシする。
 
 ## 重要な実装ポイント
 
-`/api/preview/info` の hosted mode 分岐で、`seasonId` がなく `playbackUrl` が `litevideo` の場合は `resolvePlayableSource()` に進ませない。ここで進ませると Vercel 側で litevideo 解析に失敗し、detail page スクレイピングへ落ちる。
+`/api/preview/info` の hosted mode 分岐で、`seasonId` がなく `playbackUrl` が `litevideo` の場合は、外側の `litevideo` ページや detail page スクレイピングには進ませない。ここで進ませると Vercel 側で detail page 抽出へ落ちやすい。
 
-代わりに次のようなレスポンスを返す。
+代わりに、組み立てた内側 `html5_player` を取得し、`bitrates` の中から最も高画質な mp4 を選んで次のようなレスポンスを返す。
 
 ```json
 {
-  "type": "iframe",
-  "playbackUrl": "https://www.dmm.co.jp/service/digitalapi/-/html5_player/=/cid=.../mtype=AhRVShI_/service=litevideo/mode=part/width=1920/height=1080/forceAutoPlay=1/affi_id=.../"
+  "type": "direct",
+  "playbackUrl": "https://cc3001.dmm.co.jp/pv/.../...hhb.mp4"
 }
 ```
 
-フロント側は `type: "iframe"` を受けたら `<video>` を隠し、同じプレイヤー枠内に `<iframe allow="autoplay; fullscreen; picture-in-picture">` を追加する。
+フロント側は `type: "direct"` を通常の `<video>` として扱う。抽出に失敗した場合だけ、フォールバックとして `type: "iframe"` を返し、`<iframe allow="autoplay; fullscreen; picture-in-picture">` を表示する。
 
 ## これまでの失敗パターン
 
@@ -53,17 +53,28 @@ Vercel hosted mode の成功パターンは次の通り。
 ## 現在の対策
 
 - `buildHostedLitevideoPlayerUrl()` で `litevideo` URL から `cid` / `mode` / `affi_id` を取り出し、直接 `html5_player` URLを組み立てる。
-- `width=1920` / `height=1080` を指定し、プレイヤー初期表示を大きくする。
-- `forceAutoPlay=1` を指定し、複数選択後の一括再生で iframe 側も再生開始しやすくする。
-- プレイヤー枠の CSS は `position: relative`、iframe は `position: absolute; inset: 0; width: 100%; height: 100%` にして、枠いっぱいに表示する。
+- `extractBestPlayableSourceFromHtml()` で `html5_player` HTML内の `bitrates` を読み、`FullHD (1080p)` の `...hhb.mp4` を優先して選ぶ。
+- `/api/preview/info` は hosted FANZA `litevideo` の場合、成功時に `type: "direct"` と FullHD mp4 URLを返す。
+- `/api/preview/play` も同じ FullHD mp4 URLへ 302 する。
+- 抽出に失敗した場合だけ、再生不能を避けるため `html5_player` iframe にフォールバックする。
+- iframe フォールバック用に、プレイヤー枠の CSS は `position: relative`、iframe は `position: absolute; inset: 0; width: 100%; height: 100%` にして、枠いっぱいに表示する。
 
 ## 2026-04-26 追加試行ログ
 
 - 外側の `litevideo` ページを iframe にすると、再生はできても内側プレイヤーが `476x306` 固定で生成されるため、黒い余白が大きく残った。
 - `html5_player` へ直接変換し、`width=1920` / `height=1080` を付けた場合、プレイヤー設定上の `height` は `1080px` になり、ビットレート候補にも `FullHD (1080p)` が先頭で含まれる。
+- ただし `html5_player` の初期 `src` は `...mhb.mp4` で、これは `高画質 (576p)` に相当する。`size=1920_1080` / `quality=1080p` / `bitrate=FullHD` / `defaultQuality=1080p` / `src=hhb` などを試しても初期 `src` は変わらなかった。
 - `forceAutoPlay=1` を付けると、プレイヤー設定の `autoPlay` が `true` になる。
 - `muted=1` / `mute=1` / `volume=0` / `forceMuted=1` / `playMuted=1` も試したが、プレイヤー設定の `muted` は `false` のままで変わらなかった。そのためミュート指定は採用せず、`iframe allow="autoplay; fullscreen; picture-in-picture"` と `forceAutoPlay=1` の組み合わせで一括再生を成立させる。
 - hosted mode の `/api/preview/info` と `/api/preview/play` は、どちらも `html5_player` URL に `width=1920` / `height=1080` / `forceAutoPlay=1` / `affi_id` が含まれることをローカルで確認済み。
+
+## 2026-04-26 追加試行ログ - 576p固定対策
+
+- ユーザー報告: 女優検索後の複数再生は動くが、DMMプレイヤー上の初期画質が 576p で、FullHD がデフォルトになっていない。
+- 原因: `html5_player` HTML内の `bitrates` には `FullHD (1080p)` があるが、初期 `src` は `...mhb.mp4` の 576p だった。
+- URLパラメータで初期画質を変える試行は失敗したため、iframe方式だけではFullHD既定にできない。
+- 対策: hosted FANZA `litevideo` では `html5_player` HTMLを取得し、`bitrates` から `FullHD (1080p)` の `...hhb.mp4` を抽出して `type: "direct"` として返す。
+- これにより、ブラウザの `<video>` が最初から FullHD mp4 を再生する。DMM iframe は抽出失敗時のフォールバックとしてのみ使う。
 
 ## 調査コマンド
 

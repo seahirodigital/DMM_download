@@ -7,7 +7,7 @@ const { pipeline } = require('node:stream/promises');
 
 const { getPublicConfig, loadConfig, saveConfigPatch } = require('./lib/config');
 const { DownloadManager } = require('./lib/download-manager');
-const { resolvePlayableSource } = require('./lib/dmm-downloader');
+const { extractBestPlayableSourceFromHtml, resolvePlayableSource } = require('./lib/dmm-downloader');
 const { fetchActressSearch, fetchRanking } = require('./lib/ranking-service');
 const { StateStore } = require('./lib/state-store');
 const {
@@ -512,6 +512,41 @@ async function createApp() {
     }
 
     const source = await resolvePlayableSource(item, config);
+    previewSourceCache.set(cacheKey, {
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      source
+    });
+    return source;
+  }
+
+  async function resolveHostedLitevideoSource(item) {
+    const playerUrl = buildHostedLitevideoPlayerUrl(item.playbackUrl);
+    const cacheKey = `hosted-litevideo:${playerUrl}`;
+    const cached = previewSourceCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.source;
+    }
+
+    const response = await fetch(playerUrl, {
+      headers: buildPreviewHeaders(item.detailUrl || item.playbackUrl || playerUrl),
+      signal: AbortSignal.timeout(config.downloads.requestTimeoutMs)
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch hosted litevideo player: ${response.status} ${playerUrl}`);
+    }
+
+    const extracted = extractBestPlayableSourceFromHtml(await response.text(), playerUrl);
+    if (!extracted?.url) {
+      throw new Error(`Failed to extract hosted litevideo media source: ${playerUrl}`);
+    }
+
+    const source = {
+      detailUrl: playerUrl,
+      extractor: 'hosted-litevideo-html5-player',
+      signal: extracted.signal,
+      type: extracted.type || 'direct',
+      url: extracted.url
+    };
     previewSourceCache.set(cacheKey, {
       expiresAt: Date.now() + 10 * 60 * 1000,
       source
@@ -1025,6 +1060,21 @@ async function createApp() {
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || '');
     if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
+      try {
+        const source = await resolveHostedLitevideoSource(item);
+        response.writeHead(302, {
+          'Cache-Control': 'no-store',
+          Location: source.url
+        });
+        response.end();
+        return;
+      } catch (error) {
+        console.error('[preview/play] hosted litevideo FullHD extraction failed; falling back to iframe', {
+          error: error.message,
+          playbackUrl: sanitizeUrlForLog(item.playbackUrl)
+        });
+      }
+
       response.writeHead(302, {
         'Cache-Control': 'no-store',
         Location: buildHostedLitevideoPlayerUrl(item.playbackUrl)
@@ -1076,6 +1126,20 @@ async function createApp() {
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || Date.now());
     if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
+      try {
+        const source = await resolveHostedLitevideoSource(item);
+        sendJson(response, 200, {
+          playbackUrl: source.url,
+          type: source.type || 'direct'
+        });
+        return;
+      } catch (error) {
+        console.error('[preview/info] hosted litevideo FullHD extraction failed; falling back to iframe', {
+          error: error.message,
+          playbackUrl: sanitizeUrlForLog(item.playbackUrl)
+        });
+      }
+
       sendJson(response, 200, {
         playbackUrl: buildHostedLitevideoPlayerUrl(item.playbackUrl),
         type: 'iframe'
