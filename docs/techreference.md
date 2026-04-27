@@ -270,7 +270,7 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:4312/api/search/actress?keyword=<女優
 - iPad 横向きの複数再生は `favorite-preview-grid-multi` を 2 カラムにし、1 画面で 4 動画を見られる状態を基準にする。
 - iPhone の複数再生は 2 画面表示を基準にする。
 - 動画下の省スペースメタ情報は、iPad/iPhone ともに `商品ID -> 女優名 -> タイトル名` の順で 1 行表示する。
-- 1 行に入り切らない文字は `overflow: hidden` と `text-overflow: ellipsis` で省略する。複数行に戻さない。
+- 1 行に入り切らない文字は、女優名だけ `overflow: hidden` と `text-overflow: ellipsis` で省略する。商品IDは省略しない。タイトル名は商品IDと女優名の後ろに続け、先頭から見える状態を維持する。
 - お気に入りボタンは既存位置を維持する。メタ情報の順番変更や省スペース化でボタン位置を動かさない。
 - 4 件を超える iPad 複数再生では、動画グリッド自体ではなくページ側を縦スクロールさせる。`inline-preview-active` body class を使い、`.content` をスクロール可能にする。
 - 動画以外の UI は固定しない。複数再生ヘッダーや選択操作 UI は、下スクロール時に動画と一緒に流れる。
@@ -291,5 +291,5 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:4312/api/search/actress?keyword=<女優
    - 成功パターンは、再生開始時の item を `activeDashboardPreviewItems` に保持し、ランキング一覧が一時的に空でも `cachedRankingItems` を使って表示を維持すること。
 
 4. iPad/iPhone のメタ情報を複数行にすると、動画カード下の余白が増え、1 画面内に表示できる動画数が減る。
-   - 成功パターンは `商品ID -> 女優名 -> タイトル名` を 1 行に並べ、入り切らない部分だけ省略すること。
+   - 成功パターンは `商品ID -> 女優名 -> タイトル名` を 1 行に並べ、商品IDは省略せず、女優名だけを省略対象にすること。
    - `favorite-preview-code` と `favorite-preview-subtitle` の下段表示は iPad/iPhone では隠し、同じ情報を 1 行メタに集約する。

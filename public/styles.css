@@ -1749,11 +1749,13 @@ tbody tr:hover {
 }
 
 .favorite-preview-title-text,
-.favorite-preview-inline-detail {
+.favorite-preview-product-code,
+.favorite-preview-actress-name {
   min-width: 0;
 }
 
-.favorite-preview-inline-detail {
+.favorite-preview-product-code,
+.favorite-preview-actress-name {
   display: none;
 }
 
@@ -2662,23 +2664,34 @@ tbody tr:hover {
   }
 
   body.ipad-inline-layout .favorite-preview-title-text,
-  body.ipad-inline-layout .favorite-preview-inline-detail {
+  body.ipad-inline-layout .favorite-preview-product-code,
+  body.ipad-inline-layout .favorite-preview-actress-name {
     display: inline-block;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   body.ipad-inline-layout .favorite-preview-title-text {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
+    overflow: visible;
   }
 
-  body.ipad-inline-layout .favorite-preview-inline-detail {
-    flex: 0 2 auto;
-    max-width: 28%;
+  body.ipad-inline-layout .favorite-preview-product-code,
+  body.ipad-inline-layout .favorite-preview-actress-name {
     color: var(--text-soft);
     font-size: 0.86em;
     font-weight: 700;
+  }
+
+  body.ipad-inline-layout .favorite-preview-product-code {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  body.ipad-inline-layout .favorite-preview-actress-name {
+    flex: 1 1 auto;
+    max-width: 28%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   body.ipad-inline-layout .favorite-preview-code,
@@ -2832,23 +2845,34 @@ tbody tr:hover {
   }
 
   body.iphone-inline-layout .favorite-preview-title-text,
-  body.iphone-inline-layout .favorite-preview-inline-detail {
+  body.iphone-inline-layout .favorite-preview-product-code,
+  body.iphone-inline-layout .favorite-preview-actress-name {
     display: inline-block;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   body.iphone-inline-layout .favorite-preview-title-text {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
+    overflow: visible;
   }
 
-  body.iphone-inline-layout .favorite-preview-inline-detail {
-    flex: 0 2 auto;
-    max-width: 30%;
+  body.iphone-inline-layout .favorite-preview-product-code,
+  body.iphone-inline-layout .favorite-preview-actress-name {
     color: var(--text-soft);
     font-size: 0.82em;
     font-weight: 700;
+  }
+
+  body.iphone-inline-layout .favorite-preview-product-code {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  body.iphone-inline-layout .favorite-preview-actress-name {
+    flex: 1 1 auto;
+    max-width: 30%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   body.iphone-inline-layout .favorite-preview-code,
