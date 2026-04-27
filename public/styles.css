@@ -2595,6 +2595,19 @@ tbody tr:hover {
 }
 
 @media (hover: none) and (pointer: coarse) and (min-width: 768px) and (max-width: 1400px) {
+  body.ipad-inline-layout.inline-preview-active .content {
+    height: 100vh;
+    height: 100dvh;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.ipad-inline-layout.inline-preview-active #dashboard-view.active,
+  body.ipad-inline-layout.inline-preview-active #favorites-view.active,
+  body.ipad-inline-layout.inline-preview-active #search-view.active {
+    display: block;
+  }
+
   body.ipad-inline-layout #dashboard-ranking .ranking-header,
   body.ipad-inline-layout #favorites-content .ranking-header,
   body.ipad-inline-layout #search-results .ranking-header {
@@ -2611,8 +2624,7 @@ tbody tr:hover {
   body.ipad-inline-layout #favorites-content.inline-preview-active,
   body.ipad-inline-layout #search-results.inline-preview-active {
     min-height: 0;
-    overflow: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible;
   }
 
   body.ipad-inline-layout #dashboard-ranking.inline-preview-active .ranking-grid,

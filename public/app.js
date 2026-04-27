@@ -814,6 +814,11 @@ function syncResponsiveActionPlacement() {
   }
 }
 
+function syncInlinePreviewLayoutState() {
+  const activeInlinePreview = Boolean(document.querySelector('.view.active .section-block.inline-preview-active'));
+  document.body.classList.toggle('inline-preview-active', activeInlinePreview);
+}
+
 async function requestJson(url, options = {}) {
   const response = await fetch(url, {
     headers: {
@@ -858,6 +863,7 @@ function switchTab(tabName) {
   document.querySelectorAll('.view').forEach((view) => {
     view.classList.toggle('active', view.id === `${tabName}-view`);
   });
+  syncInlinePreviewLayoutState();
 
   if (tabName === 'history') {
     renderHistory();
@@ -1980,6 +1986,7 @@ function renderRankingSection(container, options) {
   container.classList.toggle('inline-preview-dashboard', inlinePreviewAction === 'dashboard');
   container.classList.toggle('inline-preview-search', inlinePreviewAction === 'search');
   container.classList.toggle('inline-preview-favorites', inlinePreviewAction === 'favorites');
+  syncInlinePreviewLayoutState();
   const cacheKey = options.cacheKey;
   const signature = rankingSectionSignature(options);
   if (cacheKey && state.renderCache[cacheKey] === signature) {
