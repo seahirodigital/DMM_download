@@ -1150,6 +1150,13 @@ async function createApp() {
       return;
     }
 
+    if (hosted && !item.seasonId && !item.playbackUrl) {
+      sendJson(response, 400, {
+        error: 'Hosted preview requires a sample playback URL for actress search results.'
+      });
+      return;
+    }
+
     const source = await resolvePreviewSource(item, { forceRefresh });
     const proxiedPlaybackUrl = `/api/preview/play?${buildPreviewPlaybackParams(item, {
       forceRefresh,
