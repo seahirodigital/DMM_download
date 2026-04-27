@@ -407,7 +407,7 @@ function toggleFavoriteSelection(key, isSelected = !state.selectedFavoriteKeys.h
     state.selectedFavoriteKeys.delete(key);
   }
 
-  renderFavorites();
+  syncCardSelectionControl(elements.favoritesContent, key, isSelected);
   syncFavoriteSelectionControls();
 }
 
@@ -438,7 +438,7 @@ function toggleSearchSelection(key, isSelected = !state.selectedSearchKeys.has(k
     state.selectedSearchKeys.delete(key);
   }
 
-  renderSearchResults();
+  syncCardSelectionControl(elements.searchResults, key, isSelected);
   syncSearchSelectionControls();
 }
 
@@ -701,6 +701,17 @@ function syncSearchSelectionControls() {
   );
 }
 
+function syncCardSelectionControl(container, key, isSelected) {
+  if (!container || !key) {
+    return;
+  }
+
+  container.querySelectorAll(`[data-card-select-key="${CSS.escape(key)}"]`).forEach((checkbox) => {
+    checkbox.checked = Boolean(isSelected);
+    checkbox.closest('.ranking-card-select')?.classList.toggle('active', Boolean(isSelected));
+  });
+}
+
 function setDownloadSelectionMode(isEnabled) {
   state.downloadSelectionMode = isEnabled;
   if (!isEnabled) {
@@ -731,6 +742,7 @@ function toggleDownloadSelection(key, isSelected) {
     state.selectedDownloadKeys.delete(key);
   }
 
+  syncCardSelectionControl(elements.dashboardRanking, key, isSelected);
   updateSelectionButton();
   syncDashboardSelectionControls();
 }
@@ -1580,6 +1592,10 @@ function scheduleInlinePreviewAudioFocusSync(repeatCount = 2) {
 
 function bindInlinePreviewAudioFocus(container) {
   container.querySelectorAll('[data-inline-preview-card-key]').forEach((card) => {
+    if (card.dataset.inlinePreviewAudioBound === 'true') {
+      return;
+    }
+    card.dataset.inlinePreviewAudioBound = 'true';
     const activate = () => {
       const key = card.dataset.inlinePreviewCardKey;
       if (!key) {
@@ -1849,6 +1865,69 @@ function rankingSectionSignature(options) {
   });
 }
 
+function collectInlinePreviewCards(container) {
+  const cards = new Map();
+  container?.querySelectorAll('[data-inline-preview-card-key]').forEach((card) => {
+    const key = card.dataset.inlinePreviewCardKey;
+    if (key) {
+      const video = card.querySelector('[data-inline-preview-video]');
+      cards.set(key, {
+        card,
+        playback: video
+          ? {
+              currentTime: video.currentTime || 0,
+              muted: video.muted,
+              paused: video.paused,
+              playbackRate: video.playbackRate || 1
+            }
+          : null
+      });
+    }
+  });
+  return cards;
+}
+
+function disposeInlinePreviewCard(card) {
+  const video = card?.querySelector?.('[data-inline-preview-video]');
+  if (video) {
+    resetVideoElement(video);
+  }
+  card?.remove?.();
+}
+
+function restoreInlinePreviewCards(container, preservedCards) {
+  if (!container || !preservedCards?.size) {
+    return;
+  }
+
+  const restoredKeys = new Set();
+  container.querySelectorAll('[data-inline-preview-card-key]').forEach((nextCard) => {
+    const key = nextCard.dataset.inlinePreviewCardKey;
+    const preserved = key ? preservedCards.get(key) : null;
+    if (!preserved?.card) {
+      return;
+    }
+    restoredKeys.add(key);
+    nextCard.replaceWith(preserved.card);
+
+    const video = preserved.card.querySelector('[data-inline-preview-video]');
+    if (video && preserved.playback) {
+      video.playbackRate = preserved.playback.playbackRate;
+      video.muted = preserved.playback.muted;
+      video.defaultMuted = preserved.playback.muted;
+      if (!preserved.playback.paused) {
+        video.play().catch(() => {});
+      }
+    }
+  });
+
+  preservedCards.forEach((preserved, key) => {
+    if (!restoredKeys.has(key)) {
+      disposeInlinePreviewCard(preserved.card);
+    }
+  });
+}
+
 function renderRankingSection(container, options) {
   if (!container) {
     return;
@@ -1861,6 +1940,7 @@ function renderRankingSection(container, options) {
     return;
   }
 
+  const preservedInlinePreviewCards = collectInlinePreviewCards(container);
   options.onBeforeRender?.();
 
   if (cacheKey) {
@@ -1990,6 +2070,7 @@ function renderRankingSection(container, options) {
     ${options.footerHtml || ''}
   `;
 
+  restoreInlinePreviewCards(container, preservedInlinePreviewCards);
   bindRankingCardActions(container, items, options);
   options.onAfterRender?.();
 }
@@ -2190,7 +2271,7 @@ function renderDashboardRanking() {
         });
       }
     },
-    onBeforeRender: allowInlinePlayback ? destroyDashboardPreviewPlayers : undefined,
+    onBeforeRender: allowInlinePlayback && !activePreviewItems.length ? destroyDashboardPreviewPlayers : undefined,
     previewMode: allowInlinePlayback ? 'dashboard-inline' : 'default',
     selectionKind: 'download',
     selectionMode: state.downloadSelectionMode,
@@ -2540,7 +2621,7 @@ function renderSearchResults() {
         });
       }
     },
-    onBeforeRender: allowInlinePlayback ? destroySearchPreviewPlayers : undefined,
+    onBeforeRender: allowInlinePlayback && !activePreviewItems.length ? destroySearchPreviewPlayers : undefined,
     previewMode: allowInlinePlayback ? 'search-inline' : 'default',
     selectionKind: showBrowserControls ? 'search' : '',
     selectionMode: showBrowserControls && state.searchSelectionMode,
@@ -2681,6 +2762,37 @@ function renderInlinePreviewSection(items, options = {}) {
   `;
 }
 
+function destroyInlinePreviewPlayer(playerStore, key) {
+  const player = playerStore?.get?.(key);
+  if (player) {
+    destroyHlsPlayerInstance(player);
+    playerStore.delete(key);
+  }
+}
+
+function removeInlinePreviewCardElement(container, key, playerStore) {
+  if (!container || !key) {
+    return false;
+  }
+
+  const card = container.querySelector(`[data-inline-preview-card-key="${CSS.escape(key)}"]`);
+  if (!card) {
+    return false;
+  }
+
+  destroyInlinePreviewPlayer(playerStore, key);
+  disposeInlinePreviewCard(card);
+
+  const remainingCards = [...container.querySelectorAll('[data-inline-preview-card-key]')];
+  const grid = container.querySelector('.favorite-preview-grid');
+  if (grid) {
+    grid.classList.toggle('favorite-preview-grid-single', remainingCards.length <= 1);
+    grid.classList.toggle('favorite-preview-grid-multi', remainingCards.length > 1);
+  }
+  scheduleInlinePreviewAudioFocusSync(2);
+  return true;
+}
+
 function removeDashboardInlinePreview(key) {
   if (!key) {
     return;
@@ -2694,7 +2806,14 @@ function removeDashboardInlinePreview(key) {
   if (state.activeInlinePreviewAudioKey === key) {
     state.activeInlinePreviewAudioKey = state.activeDashboardPreviewKeys[0] || '';
   }
-  renderDashboardRanking();
+  if (!state.activeDashboardPreviewKeys.length) {
+    closeDashboardInlinePreviews();
+    syncDashboardSelectionControls();
+    return;
+  }
+  if (!removeInlinePreviewCardElement(elements.dashboardRanking, key, state.dashboardPreviewPlayers)) {
+    renderDashboardRanking();
+  }
   syncDashboardSelectionControls();
 }
 
@@ -2708,7 +2827,14 @@ function removeFavoriteInlinePreview(key) {
   if (state.activeInlinePreviewAudioKey === key) {
     state.activeInlinePreviewAudioKey = state.activeFavoritePreviewKeys[0] || '';
   }
-  renderFavorites();
+  if (!state.activeFavoritePreviewKeys.length) {
+    closeFavoriteInlinePreviews();
+    syncFavoriteSelectionControls();
+    return;
+  }
+  if (!removeInlinePreviewCardElement(elements.favoritesContent, key, state.favoritePreviewPlayers)) {
+    renderFavorites();
+  }
   syncFavoriteSelectionControls();
 }
 
@@ -2722,7 +2848,14 @@ function removeSearchInlinePreview(key) {
   if (state.activeInlinePreviewAudioKey === key) {
     state.activeInlinePreviewAudioKey = state.activeSearchPreviewKeys[0] || '';
   }
-  renderSearchResults();
+  if (!state.activeSearchPreviewKeys.length) {
+    closeSearchInlinePreviews();
+    syncSearchSelectionControls();
+    return;
+  }
+  if (!removeInlinePreviewCardElement(elements.searchResults, key, state.searchPreviewPlayers)) {
+    renderSearchResults();
+  }
   syncSearchSelectionControls();
 }
 
@@ -2742,6 +2875,10 @@ function removeInlinePreview(action, key) {
 
 function bindInlinePreviewRemoveControls(container) {
   container?.querySelectorAll('[data-inline-preview-remove]').forEach((button) => {
+    if (button.dataset.inlinePreviewRemoveBound === 'true') {
+      return;
+    }
+    button.dataset.inlinePreviewRemoveBound = 'true';
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -2908,6 +3045,10 @@ async function mountDashboardInlinePreviews(items, mountToken = currentInlinePre
 
   bindInlinePreviewAudioFocus(elements.dashboardRanking);
   elements.dashboardRanking.querySelectorAll('[data-inline-preview-favorite]').forEach((button) => {
+    if (button.dataset.inlinePreviewFavoriteBound === 'true') {
+      return;
+    }
+    button.dataset.inlinePreviewFavoriteBound = 'true';
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -3012,6 +3153,10 @@ async function mountSearchInlinePreviews(items, mountToken = currentInlinePrevie
 
   bindInlinePreviewAudioFocus(elements.searchResults);
   elements.searchResults.querySelectorAll('[data-inline-preview-favorite]').forEach((button) => {
+    if (button.dataset.inlinePreviewFavoriteBound === 'true') {
+      return;
+    }
+    button.dataset.inlinePreviewFavoriteBound = 'true';
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -3146,7 +3291,7 @@ function renderFavorites() {
         });
       }
     },
-    onBeforeRender: allowInlinePlayback ? destroyFavoritePreviewPlayers : undefined,
+    onBeforeRender: allowInlinePlayback && !activePreviewItems.length ? destroyFavoritePreviewPlayers : undefined,
     previewMode: showBrowserControls ? 'favorite-inline' : 'default',
     selectionKind: showBrowserControls ? 'favorite' : '',
     selectionMode: showBrowserControls && state.favoriteSelectionMode,
