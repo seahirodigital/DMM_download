@@ -2625,6 +2625,7 @@ tbody tr:hover {
   body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-section,
   body.ipad-inline-layout #favorites-content.inline-preview-active .favorite-preview-section,
   body.ipad-inline-layout #search-results.inline-preview-active .favorite-preview-section {
+    min-height: 0;
     margin-top: 12px;
   }
 
@@ -2685,6 +2686,13 @@ tbody tr:hover {
   body.ipad-inline-layout #favorites-content.inline-preview-active .favorite-preview-grid-multi,
   body.ipad-inline-layout #search-results.inline-preview-active .favorite-preview-grid-multi {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: calc(100vh - 176px);
+    max-height: calc(100dvh - 176px);
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
   }
 
   body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-title,
