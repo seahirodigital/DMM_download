@@ -776,7 +776,7 @@ function renderActressSearchForm(options = {}) {
   return `
     <form id="${prefix}actress-search-form" class="header-search-form ${escapeHtml(extraClass)}" data-actress-search-form>
       <label class="header-control header-search-control">
-        <span>女優名</span>
+        <span>検索語</span>
         <input
           id="${prefix}actress-search-input"
           class="text-input header-search-input"
@@ -784,7 +784,7 @@ function renderActressSearchForm(options = {}) {
           autocomplete="off"
           data-actress-search-input
           value="${escapeHtml(inputValue)}"
-          placeholder="女優名で検索"
+          placeholder="女優名・商品名で検索"
         />
       </label>
       <div class="search-provider-switch" role="group" aria-label="検索先">
@@ -807,7 +807,7 @@ function renderActressSearchForm(options = {}) {
           F
         </button>
       </div>
-      <button class="header-command-button actress-search-submit" type="submit" title="Search" aria-label="Search actress" ${state.search.loading ? 'disabled' : ''}>
+      <button class="header-command-button actress-search-submit" type="submit" title="Search" aria-label="Search keyword" ${state.search.loading ? 'disabled' : ''}>
         <span aria-hidden="true">${state.search.loading ? '&hellip;' : '&#128269;'}</span>
       </button>
     </form>
@@ -2192,7 +2192,7 @@ function renderSearchResults() {
   const allowInlinePlayback = showBrowserControls && state.tab === 'search';
   const selectedCount = state.selectedSearchKeys.size;
   const statusText = search.loading
-    ? 'DMM検索を実行中です。'
+    ? `${searchProviderLabel(search.provider)}検索を実行中です。`
     : search.error
       ? search.error
       : searchItems.length
@@ -2201,7 +2201,7 @@ function renderSearchResults() {
           }`
         : totalSearchItems.length && areSearchFiltersActive()
           ? `${searchProviderLabel(search.provider)} 0件を表示中 / 絞り込み前${totalSearchItems.length}件`
-          : 'ヘッダーの検索フォームから女優名を入力してください。';
+          : 'ヘッダーの検索フォームから女優名または商品名を入力してください。';
   const headerAsideHtml = showBrowserControls
     ? `
         <div class="ranking-header-actions">
@@ -2250,7 +2250,7 @@ function renderSearchResults() {
       ? areSearchFiltersActive()
         ? 'フィルター条件に合うコンテンツは見つかりませんでした。'
         : '該当するコンテンツは見つかりませんでした。'
-      : '検索キーワードを入力してください。',
+      : '検索語を入力してください。',
     eyebrow: `${searchProviderLabel(search.provider)}検索`,
     footerHtml:
       allowInlinePlayback && activePreviewItems.length
@@ -2317,7 +2317,7 @@ function renderSearchResults() {
     selectionMode: showBrowserControls && state.searchSelectionMode,
     selectedKeys: state.selectedSearchKeys,
     statusText,
-    title: search.query ? `${search.query} のコンテンツ` : '女優名検索'
+    title: search.query ? `${search.query} のコンテンツ` : '女優名・商品名検索'
   });
 }
 
@@ -3372,9 +3372,9 @@ async function searchActress(queryOverride = null) {
       ? document.activeElement
       : document.querySelector('[data-actress-search-input]');
   const queryValue = queryOverride === null ? (input?.value ?? state.searchDraft ?? state.search.query ?? '') : queryOverride;
-  const actress = String(queryValue || '').trim();
-  if (!actress) {
-    showMessage('検索する女優名を入力してください。', 'error');
+  const keyword = String(queryValue || '').trim();
+  if (!keyword) {
+    showMessage('検索する女優名または商品名を入力してください。', 'error');
     input?.focus();
     return;
   }
@@ -3386,10 +3386,10 @@ async function searchActress(queryOverride = null) {
     items: [],
     loading: true,
     provider,
-    query: actress,
+    query: keyword,
     total: 0
   };
-  state.searchDraft = actress;
+  state.searchDraft = keyword;
   state.activeSearchPreviewKeys = [];
   state.selectedSearchKeys.clear();
   state.searchSelectionMode = false;
@@ -3401,7 +3401,7 @@ async function searchActress(queryOverride = null) {
 
   try {
     const params = new URLSearchParams({
-      actress,
+      keyword,
       pageSize: '100',
       provider
     });
@@ -3414,7 +3414,7 @@ async function searchActress(queryOverride = null) {
       pageSize: result.search?.pageSize || 0,
       pagesFetched: result.search?.pagesFetched || 0,
       provider: normalizeSearchProvider(result.search?.searchProvider || provider),
-      query: result.search?.query || actress,
+      query: result.search?.query || keyword,
       sourcePageUrl: result.search?.sourcePageUrl || '',
       total: result.search?.total || 0
     };

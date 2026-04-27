@@ -746,8 +746,10 @@ async function createApp() {
 
   async function handleActressSearch(url, request, response) {
     const body = request.method === 'GET' ? {} : await readRequestBody(request);
+    const keyword = body.keyword || body.actress || url.searchParams.get('keyword') || url.searchParams.get('actress');
     const search = await fetchActressSearch(config, {
-      actress: body.actress || url.searchParams.get('actress') || url.searchParams.get('keyword'),
+      actress: keyword,
+      keyword,
       pageSize: body.pageSize || url.searchParams.get('pageSize'),
       provider: body.provider || url.searchParams.get('provider') || url.searchParams.get('site')
     });
