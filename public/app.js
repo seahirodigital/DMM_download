@@ -31,8 +31,11 @@ const state = {
     searchResults: ''
   },
   search: {
+    backgroundError: '',
+    backgroundLoading: false,
     error: '',
     fetchedAt: null,
+    hasMore: false,
     displayPageSize: 100,
     items: [],
     loading: false,
@@ -76,6 +79,7 @@ const INLINE_PREVIEW_TOKEN_KEYS = {
   search: 'searchPreviewToken'
 };
 let previewSourceTokenCounter = 0;
+let searchRequestToken = 0;
 
 function qs(id) {
   return document.getElementById(id);
@@ -104,6 +108,23 @@ function currentRankingItems() {
 
 function currentSearchItems() {
   return state.search?.items || [];
+}
+
+function mergeSearchItems(primaryItems = [], nextItems = []) {
+  const seenKeys = new Set();
+  return [...primaryItems, ...nextItems]
+    .filter((item) => {
+      const key = getItemKey(item);
+      if (!key || seenKeys.has(key)) {
+        return false;
+      }
+      seenKeys.add(key);
+      return true;
+    })
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1
+    }));
 }
 
 function normalizeSearchProvider(value) {
@@ -922,8 +943,11 @@ function setSearchProvider(provider) {
     return;
   }
 
+  searchRequestToken += 1;
   state.search = {
     ...state.search,
+    backgroundError: '',
+    backgroundLoading: false,
     page: 1,
     provider: nextProvider
   };
@@ -1789,6 +1813,7 @@ function rankingSectionSignature(options) {
   return JSON.stringify({
     allowDownloadSelection: Boolean(options.allowDownloadSelection),
     afterHeaderHtmlSignature: options.afterHeaderHtmlSignature || '',
+    afterItemsHtmlSignature: options.afterItemsHtmlSignature || '',
     beforeHtmlSignature: options.beforeHtmlSignature || '',
     downloadSelectionMode: state.downloadSelectionMode,
     emptyText: options.emptyText,
@@ -1961,6 +1986,7 @@ function renderRankingSection(container, options) {
           </div>`
         : `<div class="empty-state">${escapeHtml(options.emptyText)}</div>`
     }
+    ${options.afterItemsHtml || ''}
     ${options.footerHtml || ''}
   `;
 
@@ -2048,19 +2074,21 @@ function bindRankingCardActions(container, items, options = {}) {
       if (!item) {
         return;
       }
+      const selectedKeys = [...(options.selectedKeys || new Set())].filter(Boolean);
+      const shouldPlaySelection = Boolean(options.selectionMode && selectedKeys.length);
 
       if (options.previewMode === 'favorite-inline' && isDesktopBrowserExperience()) {
-        openFavoriteInlinePreviews([key]);
+        openFavoriteInlinePreviews(shouldPlaySelection ? selectedKeys : [key]);
         return;
       }
 
       if (options.previewMode === 'dashboard-inline' && isDesktopBrowserExperience()) {
-        openDashboardInlinePreviews([getDownloadKey(item)]);
+        openDashboardInlinePreviews(shouldPlaySelection ? selectedKeys : [getDownloadKey(item)]);
         return;
       }
 
       if (options.previewMode === 'search-inline' && isDesktopBrowserExperience()) {
-        openSearchInlinePreviews([key]);
+        openSearchInlinePreviews(shouldPlaySelection ? selectedKeys : [key]);
         return;
       }
 
@@ -2256,7 +2284,7 @@ function searchPaginationPages(currentPage, pageCount) {
   return parts;
 }
 
-function renderSearchPagingControls(filteredCount) {
+function renderSearchPagingControls(filteredCount, position = 'top') {
   if (!filteredCount) {
     return '';
   }
@@ -2313,7 +2341,7 @@ function renderSearchPagingControls(filteredCount) {
       : '';
 
   return `
-    <div class="search-pagination-bar">
+    <div class="search-pagination-bar search-pagination-bar-${escapeHtml(position)}">
       <label class="search-page-size-control">
         <span>表示件数</span>
         <select class="search-page-size-select" data-search-display-page-size>
@@ -2373,7 +2401,7 @@ function renderSearchResults() {
             pageCount > 1 ? ` / ${pageCount}ページ中${currentPage}ページ` : ''
           }${
             totalSearchItems.length !== filteredSearchItems.length ? ` / 絞り込み前${totalSearchItems.length}件` : search.total ? ` / 全${search.total}件` : ''
-          }`
+          }${search.backgroundLoading ? ' / 追加取得中' : search.backgroundError ? ` / ${search.backgroundError}` : ''}`
         : totalSearchItems.length && areSearchFiltersActive()
           ? `${searchProviderLabel(search.provider)} 0件を表示中 / 絞り込み前${totalSearchItems.length}件`
           : 'ヘッダーの検索フォームから女優名または商品名を入力してください。';
@@ -2411,16 +2439,26 @@ function renderSearchResults() {
       })}
     </div>
   `;
-  const searchPagingHtml = renderSearchPagingControls(filteredSearchItems.length);
+  const topSearchPagingHtml = renderSearchPagingControls(filteredSearchItems.length, 'top');
+  const bottomSearchPagingHtml = renderSearchPagingControls(filteredSearchItems.length, 'bottom');
   const focusSnapshot = captureActressSearchFocus(elements.searchResults);
 
   renderRankingSection(elements.searchResults, {
-    afterHeaderHtml: searchPagingHtml,
+    afterHeaderHtml: topSearchPagingHtml,
     afterHeaderHtmlSignature: JSON.stringify({
       currentPage,
       filteredCount: filteredSearchItems.length,
       pageCount,
-      pageSize
+      pageSize,
+      position: 'top'
+    }),
+    afterItemsHtml: bottomSearchPagingHtml,
+    afterItemsHtmlSignature: JSON.stringify({
+      currentPage,
+      filteredCount: filteredSearchItems.length,
+      pageCount,
+      pageSize,
+      position: 'bottom'
     }),
     beforeHtml: mobileSearchFormHtml,
     beforeHtmlSignature: JSON.stringify({
@@ -2450,8 +2488,11 @@ function renderSearchResults() {
     headerAsideHtml,
     headerAsideSignature: JSON.stringify({
       activePreviewCount: activePreviewItems.length,
+      backgroundError: search.backgroundError,
+      backgroundLoading: search.backgroundLoading,
       error: search.error,
       fetchedAt: search.fetchedAt,
+      hasMore: search.hasMore,
       loading: search.loading,
       pagesFetched: search.pagesFetched,
       provider: search.provider,
@@ -3554,6 +3595,68 @@ async function clearCookie() {
   }
 }
 
+function shouldFetchRemainingSearchResults(search = state.search) {
+  return Boolean(search?.hasMore || ((search?.items || []).length >= 100 && Number(search?.pagesFetched || 0) >= 1));
+}
+
+async function fetchRemainingSearchResults(keyword, provider, requestToken) {
+  if (requestToken !== searchRequestToken) {
+    return;
+  }
+
+  state.search = {
+    ...state.search,
+    backgroundError: '',
+    backgroundLoading: true
+  };
+  state.renderCache.searchResults = '';
+  renderSearchResults();
+
+  try {
+    const params = new URLSearchParams({
+      keyword,
+      maxPages: '100',
+      pageSize: '100',
+      provider
+    });
+    const result = await requestJson(`/api/search/actress?${params.toString()}`);
+    if (requestToken !== searchRequestToken) {
+      return;
+    }
+
+    const nextSearch = result.search || {};
+    const mergedItems = mergeSearchItems(nextSearch.items || [], state.search.items || []);
+    state.search = {
+      ...state.search,
+      backgroundError: '',
+      backgroundLoading: false,
+      fetchedAt: nextSearch.fetchedAt || state.search.fetchedAt,
+      hasMore: Boolean(nextSearch.hasMore),
+      items: mergedItems,
+      page: clampSearchPage(mergedItems),
+      pageSize: nextSearch.pageSize || state.search.pageSize,
+      pagesFetched: nextSearch.pagesFetched || state.search.pagesFetched,
+      provider: normalizeSearchProvider(nextSearch.searchProvider || provider),
+      query: nextSearch.query || state.search.query,
+      sourcePageUrl: nextSearch.sourcePageUrl || state.search.sourcePageUrl,
+      total: nextSearch.total || mergedItems.length
+    };
+    state.renderCache.searchResults = '';
+    renderSearchResults();
+  } catch (error) {
+    if (requestToken !== searchRequestToken) {
+      return;
+    }
+    state.search = {
+      ...state.search,
+      backgroundError: '追加取得に失敗しました',
+      backgroundLoading: false
+    };
+    state.renderCache.searchResults = '';
+    renderSearchResults();
+  }
+}
+
 async function searchActress(queryOverride = null) {
   const input =
     document.activeElement?.matches?.('[data-actress-search-input]')
@@ -3569,10 +3672,14 @@ async function searchActress(queryOverride = null) {
 
   const provider = normalizeSearchProvider(state.search.provider);
   const displayPageSize = searchDisplayPageSize();
+  const requestToken = ++searchRequestToken;
   state.search = {
     ...state.search,
+    backgroundError: '',
+    backgroundLoading: false,
     displayPageSize,
     error: '',
+    hasMore: false,
     items: [],
     loading: true,
     page: 1,
@@ -3593,29 +3700,47 @@ async function searchActress(queryOverride = null) {
   try {
     const params = new URLSearchParams({
       keyword,
+      maxPages: '1',
       pageSize: '100',
-      provider
+      provider,
+      stopAfterItems: '100'
     });
     const result = await requestJson(`/api/search/actress?${params.toString()}`);
+    if (requestToken !== searchRequestToken) {
+      return;
+    }
+    const nextSearch = result.search || {};
+    const initialItems = mergeSearchItems([], nextSearch.items || []);
     state.search = {
+      backgroundError: '',
+      backgroundLoading: false,
       displayPageSize: searchDisplayPageSize(),
       error: '',
-      fetchedAt: result.search?.fetchedAt || null,
-      items: result.search?.items || [],
+      fetchedAt: nextSearch.fetchedAt || null,
+      hasMore: Boolean(nextSearch.hasMore),
+      items: initialItems,
       loading: false,
       page: 1,
-      pageSize: result.search?.pageSize || 0,
-      pagesFetched: result.search?.pagesFetched || 0,
-      provider: normalizeSearchProvider(result.search?.searchProvider || provider),
-      query: result.search?.query || keyword,
-      sourcePageUrl: result.search?.sourcePageUrl || '',
-      total: result.search?.total || 0
+      pageSize: nextSearch.pageSize || 0,
+      pagesFetched: nextSearch.pagesFetched || 0,
+      provider: normalizeSearchProvider(nextSearch.searchProvider || provider),
+      query: nextSearch.query || keyword,
+      sourcePageUrl: nextSearch.sourcePageUrl || '',
+      total: nextSearch.total || initialItems.length
     };
     state.renderCache.searchResults = '';
     renderHeaderActions();
     renderSearchResults();
     showMessage(`${state.search.query} の${searchProviderLabel(state.search.provider)}検索結果を取得しました。`, 'success');
+    if (shouldFetchRemainingSearchResults(state.search)) {
+      queueMicrotask(() => {
+        fetchRemainingSearchResults(keyword, provider, requestToken);
+      });
+    }
   } catch (error) {
+    if (requestToken !== searchRequestToken) {
+      return;
+    }
     state.search = {
       ...state.search,
       error: error.message,

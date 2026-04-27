@@ -1124,6 +1124,10 @@ tbody tr:hover {
   box-shadow: var(--shadow-card);
 }
 
+.search-pagination-bar-bottom {
+  margin: 16px 0 0;
+}
+
 .search-page-size-control {
   display: inline-flex;
   align-items: center;

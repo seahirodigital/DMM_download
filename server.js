@@ -750,8 +750,10 @@ async function createApp() {
     const search = await fetchActressSearch(config, {
       actress: keyword,
       keyword,
+      maxPages: body.maxPages || url.searchParams.get('maxPages'),
       pageSize: body.pageSize || url.searchParams.get('pageSize'),
-      provider: body.provider || url.searchParams.get('provider') || url.searchParams.get('site')
+      provider: body.provider || url.searchParams.get('provider') || url.searchParams.get('site'),
+      stopAfterItems: body.stopAfterItems || url.searchParams.get('stopAfterItems')
     });
 
     sendJson(response, 200, {
