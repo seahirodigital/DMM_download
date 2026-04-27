@@ -61,6 +61,7 @@ const state = {
   searchSelectionMode: false,
   shortcutModalOpen: false,
   snapshot: null,
+  tabletLayout: false,
   touchDevice: false,
   thumbnailModalOpen: false,
   tab: 'dashboard',
@@ -80,6 +81,8 @@ const INLINE_PREVIEW_TOKEN_KEYS = {
 };
 let previewSourceTokenCounter = 0;
 let searchRequestToken = 0;
+const TOUCH_DEVICE_MEDIA_QUERY = '(hover: none) and (pointer: coarse)';
+const TABLET_LAYOUT_MEDIA_QUERY = `${TOUCH_DEVICE_MEDIA_QUERY} and (min-width: 768px) and (max-width: 1400px)`;
 
 function qs(id) {
   return document.getElementById(id);
@@ -322,8 +325,22 @@ function favoriteItemsSorted() {
   });
 }
 
+function syncResponsiveState() {
+  const touchDevice = window.matchMedia(TOUCH_DEVICE_MEDIA_QUERY).matches;
+  const tabletLayout = window.matchMedia(TABLET_LAYOUT_MEDIA_QUERY).matches;
+  const changed = state.touchDevice !== touchDevice || state.tabletLayout !== tabletLayout;
+  state.touchDevice = touchDevice;
+  state.tabletLayout = tabletLayout;
+  document.body.classList.toggle('ipad-inline-layout', tabletLayout);
+  return changed;
+}
+
 function isDesktopBrowserExperience() {
   return !state.touchDevice;
+}
+
+function canUseInlinePreviewExperience() {
+  return isDesktopBrowserExperience() || state.tabletLayout;
 }
 
 function appCapabilities() {
@@ -383,7 +400,7 @@ function pruneSearchPreviewKeys() {
 }
 
 function setFavoriteSelectionMode(isEnabled) {
-  const nextValue = Boolean(isEnabled && isDesktopBrowserExperience());
+  const nextValue = Boolean(isEnabled && canUseInlinePreviewExperience());
   state.favoriteSelectionMode = nextValue;
   if (!nextValue) {
     state.selectedFavoriteKeys.clear();
@@ -412,7 +429,7 @@ function toggleFavoriteSelection(key, isSelected = !state.selectedFavoriteKeys.h
 }
 
 function setSearchSelectionMode(isEnabled) {
-  const nextValue = Boolean(isEnabled && isDesktopBrowserExperience());
+  const nextValue = Boolean(isEnabled && canUseInlinePreviewExperience());
   state.searchSelectionMode = nextValue;
   if (!nextValue) {
     state.selectedSearchKeys.clear();
@@ -462,7 +479,7 @@ function isCommandShortcutTarget(target) {
 }
 
 function playSelectedInlinePreviewsForCurrentTab() {
-  if (!isDesktopBrowserExperience()) {
+  if (!canUseInlinePreviewExperience()) {
     return false;
   }
 
@@ -1934,6 +1951,12 @@ function renderRankingSection(container, options) {
   }
 
   const items = options.items || [];
+  const inlinePreviewAction = options.inlinePreviewAction || '';
+  const inlinePreviewActive = Boolean(options.inlinePreviewActive);
+  container.classList.toggle('inline-preview-active', inlinePreviewActive);
+  container.classList.toggle('inline-preview-dashboard', inlinePreviewAction === 'dashboard');
+  container.classList.toggle('inline-preview-search', inlinePreviewAction === 'search');
+  container.classList.toggle('inline-preview-favorites', inlinePreviewAction === 'favorites');
   const cacheKey = options.cacheKey;
   const signature = rankingSectionSignature(options);
   if (cacheKey && state.renderCache[cacheKey] === signature) {
@@ -2158,17 +2181,17 @@ function bindRankingCardActions(container, items, options = {}) {
       const selectedKeys = [...(options.selectedKeys || new Set())].filter(Boolean);
       const shouldPlaySelection = Boolean(options.selectionMode && selectedKeys.length);
 
-      if (options.previewMode === 'favorite-inline' && isDesktopBrowserExperience()) {
+      if (options.previewMode === 'favorite-inline' && canUseInlinePreviewExperience()) {
         openFavoriteInlinePreviews(shouldPlaySelection ? selectedKeys : [key]);
         return;
       }
 
-      if (options.previewMode === 'dashboard-inline' && isDesktopBrowserExperience()) {
+      if (options.previewMode === 'dashboard-inline' && canUseInlinePreviewExperience()) {
         openDashboardInlinePreviews(shouldPlaySelection ? selectedKeys : [getDownloadKey(item)]);
         return;
       }
 
-      if (options.previewMode === 'search-inline' && isDesktopBrowserExperience()) {
+      if (options.previewMode === 'search-inline' && canUseInlinePreviewExperience()) {
         openSearchInlinePreviews(shouldPlaySelection ? selectedKeys : [key]);
         return;
       }
@@ -2184,7 +2207,7 @@ function bindRankingCardActions(container, items, options = {}) {
 }
 
 function renderDashboardRanking() {
-  if (!isDesktopBrowserExperience()) {
+  if (!canUseInlinePreviewExperience()) {
     destroyDashboardPreviewPlayers();
     state.activeDashboardPreviewKeys = [];
   }
@@ -2192,7 +2215,7 @@ function renderDashboardRanking() {
   const rankingItems = state.snapshot?.ranking?.items || [];
   const itemMap = new Map(rankingItems.map((item) => [getItemKey(item), item]));
   const activePreviewItems = state.activeDashboardPreviewKeys.map((key) => itemMap.get(key)).filter(Boolean);
-  const showBrowserControls = isDesktopBrowserExperience();
+  const showBrowserControls = canUseInlinePreviewExperience();
   const allowInlinePlayback = showBrowserControls && state.tab === 'dashboard';
   const selectedCount = state.selectedDownloadKeys.size;
   const statusText = rankingItems.length ? `${rankingItems.length}件を読み込み済み` : 'ランキング取得を実行するとここに表示されます。';
@@ -2246,6 +2269,8 @@ function renderDashboardRanking() {
       selectionMode: state.downloadSelectionMode,
       statusText
     }),
+    inlinePreviewAction: 'dashboard',
+    inlinePreviewActive: allowInlinePlayback && activePreviewItems.length > 0,
     items: rankingItems,
     onAfterRender: () => {
       elements.dashboardRanking?.querySelectorAll('[data-dashboard-selection-toggle]').forEach((button) => {
@@ -2449,7 +2474,7 @@ function renderSearchResults() {
     return;
   }
 
-  if (!isDesktopBrowserExperience()) {
+  if (!canUseInlinePreviewExperience()) {
     state.searchSelectionMode = false;
     state.selectedSearchKeys.clear();
     destroySearchPreviewPlayers();
@@ -2470,7 +2495,7 @@ function renderSearchResults() {
   const endCount = filteredSearchItems.length ? Math.min(filteredSearchItems.length, currentPage * pageSize) : 0;
   const itemMap = new Map(filteredSearchItems.map((item) => [getItemKey(item), item]));
   const activePreviewItems = state.activeSearchPreviewKeys.map((key) => itemMap.get(key)).filter(Boolean);
-  const showBrowserControls = isDesktopBrowserExperience();
+  const showBrowserControls = canUseInlinePreviewExperience();
   const allowInlinePlayback = showBrowserControls && state.tab === 'search';
   const selectedCount = state.selectedSearchKeys.size;
   const statusText = search.loading
@@ -2590,6 +2615,8 @@ function renderSearchResults() {
       totalSearchItems: totalSearchItems.length,
       total: search.total
     }),
+    inlinePreviewAction: 'search',
+    inlinePreviewActive: allowInlinePlayback && activePreviewItems.length > 0,
     isPreviewable: isSearchPreviewable,
     isSelectable: isSearchPreviewable,
     items: searchItems,
@@ -3201,7 +3228,7 @@ function openSearchInlinePreviews(keys) {
 }
 
 function renderFavorites() {
-  if (!isDesktopBrowserExperience()) {
+  if (!canUseInlinePreviewExperience()) {
     state.favoriteSelectionMode = false;
     state.selectedFavoriteKeys.clear();
     destroyFavoritePreviewPlayers();
@@ -3213,7 +3240,7 @@ function renderFavorites() {
 
   const favoriteItems = favoriteItemsSorted();
   const activePreviewItems = state.activeFavoritePreviewKeys.map((key) => state.favorites[key]).filter(Boolean);
-  const showBrowserControls = isDesktopBrowserExperience();
+  const showBrowserControls = canUseInlinePreviewExperience();
   const allowInlinePlayback = showBrowserControls && state.tab === 'favorites';
   const selectionCount = state.selectedFavoriteKeys.size;
   const statusText = favoriteItems.length ? `${favoriteItems.length}件を保存中` : '気になる動画を保存するとここに表示されます。';
@@ -3261,11 +3288,14 @@ function renderFavorites() {
     headerAsideHtml,
     headerAsideSignature: JSON.stringify({
       activePreviewCount: activePreviewItems.length,
+      allowInlinePlayback,
       selectionCount,
       selectionMode: state.favoriteSelectionMode,
       showBrowserControls,
       statusText
     }),
+    inlinePreviewAction: 'favorites',
+    inlinePreviewActive: allowInlinePlayback && activePreviewItems.length > 0,
     items: favoriteItems,
     onAfterRender: () => {
       elements.favoritesContent?.querySelectorAll('[data-favorite-selection-toggle]').forEach((button) => {
@@ -4248,8 +4278,18 @@ function bindStaticEvents() {
   });
   document.addEventListener('keydown', handleViewerShortcuts, true);
   elements.mobileActionMedia.addEventListener('change', () => {
-    state.touchDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+    syncResponsiveState();
     syncResponsiveActionPlacement();
+    renderDashboardRanking();
+    renderFavorites();
+    renderSearchResults();
+  });
+  window.addEventListener('resize', () => {
+    if (!syncResponsiveState()) {
+      return;
+    }
+    syncResponsiveActionPlacement();
+    renderDashboardRanking();
     renderFavorites();
     renderSearchResults();
   });
@@ -4308,7 +4348,7 @@ async function boot() {
   elements.warningList = qs('warning-list');
 
   state.favorites = loadFavorites();
-  state.touchDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  syncResponsiveState();
   bindStaticEvents();
   switchTab('dashboard');
 

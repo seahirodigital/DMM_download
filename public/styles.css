@@ -2584,3 +2584,86 @@ tbody tr:hover {
     min-width: 220px;
   }
 }
+
+@media (hover: none) and (pointer: coarse) and (min-width: 768px) and (max-width: 1400px) {
+  body.ipad-inline-layout #dashboard-ranking .ranking-header,
+  body.ipad-inline-layout #favorites-content .ranking-header,
+  body.ipad-inline-layout #search-results .ranking-header {
+    display: flex;
+  }
+
+  body.ipad-inline-layout #dashboard-ranking .ranking-header-actions,
+  body.ipad-inline-layout #favorites-content .ranking-header-actions,
+  body.ipad-inline-layout #search-results .ranking-header-actions {
+    flex-wrap: wrap;
+  }
+
+  body.ipad-inline-layout #dashboard-ranking.inline-preview-active,
+  body.ipad-inline-layout #favorites-content.inline-preview-active,
+  body.ipad-inline-layout #search-results.inline-preview-active {
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.ipad-inline-layout #dashboard-ranking.inline-preview-active .ranking-grid,
+  body.ipad-inline-layout #favorites-content.inline-preview-active .ranking-grid,
+  body.ipad-inline-layout #search-results.inline-preview-active .ranking-grid {
+    height: auto;
+    min-height: 0;
+  }
+
+  body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-section,
+  body.ipad-inline-layout #favorites-content.inline-preview-active .favorite-preview-section,
+  body.ipad-inline-layout #search-results.inline-preview-active .favorite-preview-section {
+    margin-top: 12px;
+  }
+
+  body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-card,
+  body.ipad-inline-layout #favorites-content.inline-preview-active .favorite-preview-card,
+  body.ipad-inline-layout #search-results.inline-preview-active .favorite-preview-card {
+    padding: 12px;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) and (min-width: 768px) and (max-width: 1400px) and (orientation: landscape) {
+  body.ipad-inline-layout #dashboard-ranking.inline-preview-active .ranking-grid,
+  body.ipad-inline-layout #favorites-content.inline-preview-active .ranking-grid,
+  body.ipad-inline-layout #search-results.inline-preview-active .ranking-grid {
+    max-height: 34vh;
+  }
+
+  body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-grid-multi,
+  body.ipad-inline-layout #favorites-content.inline-preview-active .favorite-preview-grid-multi,
+  body.ipad-inline-layout #search-results.inline-preview-active .favorite-preview-grid-multi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-title,
+  body.ipad-inline-layout #favorites-content.inline-preview-active .favorite-preview-title,
+  body.ipad-inline-layout #search-results.inline-preview-active .favorite-preview-title {
+    font-size: 0.86rem;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) and (min-width: 768px) and (max-width: 1400px) and (orientation: portrait) {
+  body.ipad-inline-layout #dashboard-ranking .ranking-header,
+  body.ipad-inline-layout #favorites-content .ranking-header,
+  body.ipad-inline-layout #search-results .ranking-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  body.ipad-inline-layout #dashboard-ranking .ranking-header-actions,
+  body.ipad-inline-layout #favorites-content .ranking-header-actions,
+  body.ipad-inline-layout #search-results .ranking-header-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-grid-multi,
+  body.ipad-inline-layout #favorites-content.inline-preview-active .favorite-preview-grid-multi,
+  body.ipad-inline-layout #search-results.inline-preview-active .favorite-preview-grid-multi {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
