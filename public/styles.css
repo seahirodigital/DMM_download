@@ -2715,3 +2715,131 @@ tbody tr:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+@media (hover: none) and (pointer: coarse) and (max-width: 767px), (hover: none) and (pointer: coarse) and (max-height: 599px) {
+  body.iphone-inline-layout #dashboard-ranking .ranking-header,
+  body.iphone-inline-layout #favorites-content .ranking-header,
+  body.iphone-inline-layout #search-results .ranking-header {
+    display: flex;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  body.iphone-inline-layout #dashboard-ranking .ranking-header-actions,
+  body.iphone-inline-layout #favorites-content .ranking-header-actions,
+  body.iphone-inline-layout #search-results .ranking-header-actions {
+    justify-content: flex-start;
+    width: 100%;
+    gap: 6px;
+  }
+
+  body.iphone-inline-layout #dashboard-ranking.inline-preview-active,
+  body.iphone-inline-layout #favorites-content.inline-preview-active,
+  body.iphone-inline-layout #search-results.inline-preview-active {
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.iphone-inline-layout #dashboard-ranking.inline-preview-active .ranking-grid,
+  body.iphone-inline-layout #favorites-content.inline-preview-active .ranking-grid,
+  body.iphone-inline-layout #search-results.inline-preview-active .ranking-grid {
+    height: auto;
+    max-height: 28vh;
+    min-height: 0;
+  }
+
+  body.iphone-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-section,
+  body.iphone-inline-layout #favorites-content.inline-preview-active .favorite-preview-section,
+  body.iphone-inline-layout #search-results.inline-preview-active .favorite-preview-section {
+    gap: 8px;
+    margin-top: 8px;
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  body.iphone-inline-layout .favorite-preview-header {
+    gap: 8px;
+  }
+
+  body.iphone-inline-layout .favorite-preview-header-actions {
+    gap: 6px;
+  }
+
+  body.iphone-inline-layout .favorite-preview-header h3 {
+    font-size: 0.88rem;
+  }
+
+  body.iphone-inline-layout .inline-selection-toggle,
+  body.iphone-inline-layout .favorite-preview-close-button {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 0.76rem;
+  }
+
+  body.iphone-inline-layout .inline-selection-play-button {
+    width: 32px;
+    height: 32px;
+    font-size: 0.9rem;
+  }
+
+  body.iphone-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-grid-multi,
+  body.iphone-inline-layout #favorites-content.inline-preview-active .favorite-preview-grid-multi,
+  body.iphone-inline-layout #search-results.inline-preview-active .favorite-preview-grid-multi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  body.iphone-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-card,
+  body.iphone-inline-layout #favorites-content.inline-preview-active .favorite-preview-card,
+  body.iphone-inline-layout #search-results.inline-preview-active .favorite-preview-card {
+    gap: 4px;
+    padding: 8px;
+    border-radius: 10px;
+  }
+
+  body.iphone-inline-layout .favorite-preview-player-wrap {
+    border-radius: 8px;
+  }
+
+  body.iphone-inline-layout .favorite-preview-meta {
+    gap: 0;
+  }
+
+  body.iphone-inline-layout .favorite-preview-title {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
+  body.iphone-inline-layout .favorite-preview-title-text,
+  body.iphone-inline-layout .favorite-preview-inline-detail {
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.iphone-inline-layout .favorite-preview-title-text {
+    flex: 1 1 auto;
+  }
+
+  body.iphone-inline-layout .favorite-preview-inline-detail {
+    flex: 0 2 auto;
+    max-width: 30%;
+    color: var(--text-soft);
+    font-size: 0.82em;
+    font-weight: 700;
+  }
+
+  body.iphone-inline-layout .favorite-preview-code,
+  body.iphone-inline-layout .favorite-preview-subtitle {
+    display: none;
+  }
+}

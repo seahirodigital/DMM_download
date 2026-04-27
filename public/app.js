@@ -61,6 +61,7 @@ const state = {
   searchSelectionMode: false,
   shortcutModalOpen: false,
   snapshot: null,
+  phoneLayout: false,
   tabletLayout: false,
   touchDevice: false,
   thumbnailModalOpen: false,
@@ -82,7 +83,8 @@ const INLINE_PREVIEW_TOKEN_KEYS = {
 let previewSourceTokenCounter = 0;
 let searchRequestToken = 0;
 const TOUCH_DEVICE_MEDIA_QUERY = '(hover: none) and (pointer: coarse)';
-const TABLET_LAYOUT_MEDIA_QUERY = `${TOUCH_DEVICE_MEDIA_QUERY} and (min-width: 768px) and (max-width: 1400px)`;
+const PHONE_LAYOUT_MEDIA_QUERY = `${TOUCH_DEVICE_MEDIA_QUERY} and (max-width: 767px), ${TOUCH_DEVICE_MEDIA_QUERY} and (max-height: 599px)`;
+const TABLET_LAYOUT_MEDIA_QUERY = `${TOUCH_DEVICE_MEDIA_QUERY} and (min-width: 768px) and (min-height: 600px) and (max-width: 1400px)`;
 
 function qs(id) {
   return document.getElementById(id);
@@ -327,10 +329,14 @@ function favoriteItemsSorted() {
 
 function syncResponsiveState() {
   const touchDevice = window.matchMedia(TOUCH_DEVICE_MEDIA_QUERY).matches;
+  const phoneLayout = window.matchMedia(PHONE_LAYOUT_MEDIA_QUERY).matches;
   const tabletLayout = window.matchMedia(TABLET_LAYOUT_MEDIA_QUERY).matches;
-  const changed = state.touchDevice !== touchDevice || state.tabletLayout !== tabletLayout;
+  const changed =
+    state.touchDevice !== touchDevice || state.phoneLayout !== phoneLayout || state.tabletLayout !== tabletLayout;
   state.touchDevice = touchDevice;
+  state.phoneLayout = phoneLayout;
   state.tabletLayout = tabletLayout;
+  document.body.classList.toggle('iphone-inline-layout', phoneLayout);
   document.body.classList.toggle('ipad-inline-layout', tabletLayout);
   return changed;
 }
@@ -340,7 +346,7 @@ function isDesktopBrowserExperience() {
 }
 
 function canUseInlinePreviewExperience() {
-  return isDesktopBrowserExperience() || state.tabletLayout;
+  return isDesktopBrowserExperience() || state.tabletLayout || state.phoneLayout;
 }
 
 function appCapabilities() {
