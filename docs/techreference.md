@@ -257,3 +257,39 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:4312/api/search/actress?keyword=<女優
    - DMM: GraphQL `seasonId` + DMM TV HLS。
    - FANZA: Affiliate `sampleMovieURL` + litevideo FullHD direct mp4。
    - DMM のために FANZA を GraphQL に寄せる、または FANZA のために DMM を Affiliate detail-only に寄せると、どちらかの要件が壊れる。
+
+## iPadレイアウト
+
+この章は、iPad の複数選択再生レイアウトで成功している仕様と、そこに至るまでの失敗パターンを追記する。既存章の内容は変更せず、iPad レイアウトの判断基準だけをここに追加する。
+
+### 成功仕様
+
+- iPad 判定は `public/app.js` の `TABLET_LAYOUT_MEDIA_QUERY` と `ipad-inline-layout` body class で扱う。
+- iPad では `canUseInlinePreviewExperience()` が true になり、ダウンロード候補、検索結果、お気に入りの複数選択再生を同じインラインプレビュー経路で使う。
+- iPhone 判定は `iphone-inline-layout` に分ける。iPad 横向きと iPhone 横向きが混ざらないよう、iPad 判定には `min-height: 600px` を含める。
+- iPad 横向きの複数再生は `favorite-preview-grid-multi` を 2 カラムにし、1 画面で 4 動画を見られる状態を基準にする。
+- iPhone の複数再生は 2 画面表示を基準にする。
+- 動画下の省スペースメタ情報は、iPad/iPhone ともに `商品ID -> 女優名 -> タイトル名` の順で 1 行表示する。
+- 1 行に入り切らない文字は `overflow: hidden` と `text-overflow: ellipsis` で省略する。複数行に戻さない。
+- お気に入りボタンは既存位置を維持する。メタ情報の順番変更や省スペース化でボタン位置を動かさない。
+- 4 件を超える iPad 複数再生では、動画グリッド自体ではなくページ側を縦スクロールさせる。`inline-preview-active` body class を使い、`.content` をスクロール可能にする。
+- 動画以外の UI は固定しない。複数再生ヘッダーや選択操作 UI は、下スクロール時に動画と一緒に流れる。
+- ダッシュボード複数再生中は、`activeDashboardPreviewItems` と `cachedRankingItems` で再生開始時の候補を保持する。`/api/state` の更新タイミングでランキングが一時的に空になっても、プレビューカードと video 要素を消さない。
+
+### 試行錯誤で分かったこと
+
+1. iPad の 5 件目以降を表示するために、`favorite-preview-grid-multi` だけに `max-height` と `overflow-y: auto` を付けると、動画グリッド内だけがスクロールする。
+   - この方法だと「同時再生」「閉じる」「複数選択」などのヘッダー UI が固定されたように残り、実際に視聴できる動画領域が狭くなる。
+   - 成功パターンは、グリッド内スクロールではなくページスクロールにすること。
+
+2. iPad 横向き用の既存 CSS には `.content { height: 100vh; overflow: hidden; }` と、各 section の `overflow: hidden` がある。
+   - これを解除しないと、4 画面を超えた動画カードが親要素で切られ、下スクロールしても 5 件目以降が見えない。
+   - 複数再生中だけ `body.ipad-inline-layout.inline-preview-active .content` を `overflow: auto` にし、表示中 section は `overflow: visible` にする。
+
+3. ランキング更新や自動更新のタイミングで `state.snapshot.ranking.items` が空になることがある。
+   - 再生中の候補を毎回ランキング一覧から引き直すだけだと、複数再生中に「ランキング取得を実行するとここに表示されます。」「ランキングデータがまだありません」に落ち、video 要素が破棄される。
+   - 成功パターンは、再生開始時の item を `activeDashboardPreviewItems` に保持し、ランキング一覧が一時的に空でも `cachedRankingItems` を使って表示を維持すること。
+
+4. iPad/iPhone のメタ情報を複数行にすると、動画カード下の余白が増え、1 画面内に表示できる動画数が減る。
+   - 成功パターンは `商品ID -> 女優名 -> タイトル名` を 1 行に並べ、入り切らない部分だけ省略すること。
+   - `favorite-preview-code` と `favorite-preview-subtitle` の下段表示は iPad/iPhone では隠し、同じ情報を 1 行メタに集約する。

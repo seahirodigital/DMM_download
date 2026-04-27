@@ -2797,9 +2797,9 @@ function renderInlinePreviewSection(items, options = {}) {
                   <p class="favorite-preview-status" data-inline-preview-status="${escapeHtml(key)}">読み込み中</p>
                   <div class="favorite-preview-title-row">
                     <p class="favorite-preview-title">
-                      <span class="favorite-preview-title-text">${escapeHtml(item.title || '-')}</span>
                       <span class="favorite-preview-inline-detail">${escapeHtml(productCode || '-')}</span>
                       <span class="favorite-preview-inline-detail">${escapeHtml(item.actress || '-')}</span>
+                      <span class="favorite-preview-title-text">${escapeHtml(item.title || '-')}</span>
                     </p>
                     ${
                       showFavoriteToggle
