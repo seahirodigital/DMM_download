@@ -137,7 +137,7 @@ function mergeSearchItems(primaryItems = [], nextItems = []) {
   return [...primaryItems, ...nextItems]
     .filter((item) => {
       const key = getItemKey(item);
-      if (!key || seenKeys.has(key)) {
+      if (!key || seenKeys.has(key) || isExcludedSearchItem(item)) {
         return false;
       }
       seenKeys.add(key);
@@ -185,6 +185,22 @@ function isSearchPreviewable(item) {
   return Boolean(item?.seasonId || item?.playbackUrl);
 }
 
+function isFanzaLimitedItem(item) {
+  const values = [
+    item?.title,
+    item?.subtitle,
+    item?.description,
+    item?.badge,
+    item?.label,
+    item?.campaign
+  ];
+  return values.some((value) => /(?:【\s*)?FANZA\s*限定(?:\s*】)?/i.test(String(value || '').normalize('NFKC')));
+}
+
+function isExcludedSearchItem(item) {
+  return isFanzaLimitedItem(item);
+}
+
 function splitActressNames(value) {
   return String(value || '')
     .split(/\s*(?:,|、|，|\/|／|&|＆)\s*/)
@@ -214,7 +230,10 @@ function areSearchFiltersActive() {
 
 function visibleSearchItems() {
   const filters = state.searchFilters;
-  let items = currentSearchItems();
+  let items = currentSearchItems().filter((item) => !isExcludedSearchItem(item));
+  if (state.searchSelectionMode) {
+    items = items.filter(isSearchPreviewable);
+  }
   if (filters.castType) {
     items = items.filter((item) => getSearchItemCastType(item) === filters.castType);
   }
@@ -2504,6 +2523,39 @@ function bindSearchPagingControls(root = document) {
   });
 }
 
+function captureSearchViewport() {
+  const grid = elements.searchResults?.querySelector('.ranking-grid');
+  const content = document.querySelector('.content');
+  return {
+    contentScrollTop: content?.scrollTop || 0,
+    gridScrollLeft: grid?.scrollLeft || 0,
+    gridScrollTop: grid?.scrollTop || 0,
+    hasGrid: Boolean(grid),
+    searchScrollTop: elements.searchResults?.scrollTop || 0
+  };
+}
+
+function restoreSearchViewport(snapshot) {
+  if (!snapshot?.hasGrid) {
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    const grid = elements.searchResults?.querySelector('.ranking-grid');
+    if (grid) {
+      grid.scrollLeft = snapshot.gridScrollLeft;
+      grid.scrollTop = snapshot.gridScrollTop;
+    }
+    if (elements.searchResults) {
+      elements.searchResults.scrollTop = snapshot.searchScrollTop;
+    }
+    const content = document.querySelector('.content');
+    if (content) {
+      content.scrollTop = snapshot.contentScrollTop;
+    }
+  });
+}
+
 function renderSearchResults() {
   if (!elements.searchResults) {
     return;
@@ -2520,7 +2572,7 @@ function renderSearchResults() {
   pruneSearchPreviewKeys();
 
   const search = state.search;
-  const totalSearchItems = currentSearchItems();
+  const totalSearchItems = currentSearchItems().filter((item) => !isExcludedSearchItem(item));
   const filteredSearchItems = visibleSearchItems();
   const currentPage = clampSearchPage(filteredSearchItems);
   const pageSize = searchDisplayPageSize();
@@ -2583,6 +2635,7 @@ function renderSearchResults() {
   const topSearchPagingHtml = renderSearchPagingControls(filteredSearchItems.length, 'top');
   const bottomSearchPagingHtml = renderSearchPagingControls(filteredSearchItems.length, 'bottom');
   const focusSnapshot = captureActressSearchFocus(elements.searchResults);
+  const viewportSnapshot = captureSearchViewport();
 
   renderRankingSection(elements.searchResults, {
     afterHeaderHtml: topSearchPagingHtml,
@@ -2660,6 +2713,7 @@ function renderSearchResults() {
       bindSearchFilterControls(elements.searchResults);
       bindSearchPagingControls(elements.searchResults);
       restoreActressSearchFocus(focusSnapshot);
+      restoreSearchViewport(viewportSnapshot);
       elements.searchResults?.querySelectorAll('[data-search-selection-toggle]').forEach((button) => {
         button.addEventListener('click', () => {
           toggleSearchSelectionMode();

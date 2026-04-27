@@ -2671,8 +2671,9 @@ tbody tr:hover {
   }
 
   body.ipad-inline-layout .favorite-preview-title-text {
-    flex: 0 0 auto;
-    overflow: visible;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   body.ipad-inline-layout .favorite-preview-product-code,
@@ -2688,8 +2689,8 @@ tbody tr:hover {
   }
 
   body.ipad-inline-layout .favorite-preview-actress-name {
-    flex: 1 1 auto;
-    max-width: 28%;
+    flex: 0 1 auto;
+    max-width: 10em;
     overflow: hidden;
     text-overflow: ellipsis;
   }
