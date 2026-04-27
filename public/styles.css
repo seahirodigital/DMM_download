@@ -49,6 +49,7 @@ body.settings-open {
 
 button,
 input,
+select,
 textarea,
 video {
   font: inherit;
@@ -1107,6 +1108,86 @@ tbody tr:hover {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.search-pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -4px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-card);
+}
+
+.search-page-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.search-page-size-select {
+  min-height: 36px;
+  padding: 0 30px 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--pill-radius);
+  background: #ffffff;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.search-page-status {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.search-pagination-controls {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.search-page-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  border: 1px solid rgba(0, 117, 74, 0.28);
+  border-radius: var(--pill-radius);
+  background: #ffffff;
+  color: var(--brand-accent);
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.search-page-button.active {
+  background: var(--brand-accent);
+  color: #ffffff;
+  border-color: var(--brand-accent);
+}
+
+.search-page-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.search-page-ellipsis {
+  min-width: 20px;
+  color: var(--text-soft);
+  text-align: center;
 }
 
 .filter-toggle-button {

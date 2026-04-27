@@ -33,8 +33,10 @@ const state = {
   search: {
     error: '',
     fetchedAt: null,
+    displayPageSize: 100,
     items: [],
     loading: false,
+    page: 1,
     pageSize: 0,
     pagesFetched: 0,
     provider: 'fanza',
@@ -65,6 +67,8 @@ const state = {
 
 const elements = {};
 const FAVORITES_STORAGE_KEY = 'dmm-download-favorites-v1';
+const DEFAULT_SEARCH_DISPLAY_PAGE_SIZE = 100;
+const SEARCH_DISPLAY_PAGE_SIZE_OPTIONS = [50, 100, 200, 300, 400, 500];
 const previewInfoCache = new Map();
 const INLINE_PREVIEW_TOKEN_KEYS = {
   dashboard: 'dashboardPreviewToken',
@@ -185,7 +189,36 @@ function visibleSearchItems() {
   return items;
 }
 
+function normalizeSearchDisplayPageSize(value) {
+  const pageSize = Number(value);
+  return SEARCH_DISPLAY_PAGE_SIZE_OPTIONS.includes(pageSize) ? pageSize : DEFAULT_SEARCH_DISPLAY_PAGE_SIZE;
+}
+
+function searchDisplayPageSize() {
+  return normalizeSearchDisplayPageSize(state.search?.displayPageSize);
+}
+
+function getSearchPageCount(itemsOrCount = visibleSearchItems()) {
+  const itemCount = Array.isArray(itemsOrCount) ? itemsOrCount.length : Number(itemsOrCount || 0);
+  return Math.max(1, Math.ceil(itemCount / searchDisplayPageSize()));
+}
+
+function clampSearchPage(itemsOrCount = visibleSearchItems()) {
+  const pageCount = getSearchPageCount(itemsOrCount);
+  const nextPage = Math.min(Math.max(1, Number(state.search?.page || 1)), pageCount);
+  state.search.page = nextPage;
+  return nextPage;
+}
+
+function paginatedSearchItems(items = visibleSearchItems()) {
+  const pageSize = searchDisplayPageSize();
+  const currentPage = clampSearchPage(items);
+  const startIndex = (currentPage - 1) * pageSize;
+  return items.slice(startIndex, startIndex + pageSize);
+}
+
 function refreshSearchFilterResults() {
+  state.search.page = 1;
   state.activeSearchPreviewKeys = [];
   state.selectedSearchKeys.clear();
   state.searchSelectionMode = false;
@@ -214,6 +247,34 @@ function resetSearchFilters() {
     dateSort: ''
   };
   refreshSearchFilterResults();
+}
+
+function refreshSearchPagingResults() {
+  state.activeSearchPreviewKeys = [];
+  destroySearchPreviewPlayers();
+  state.renderCache.searchResults = '';
+  renderSearchResults();
+  syncSearchSelectionControls();
+}
+
+function setSearchPage(page) {
+  const pageCount = getSearchPageCount();
+  const nextPage = Math.min(Math.max(1, Number(page || 1)), pageCount);
+  if (state.search.page === nextPage) {
+    return;
+  }
+  state.search.page = nextPage;
+  refreshSearchPagingResults();
+}
+
+function setSearchDisplayPageSize(value) {
+  const nextPageSize = normalizeSearchDisplayPageSize(value);
+  if (searchDisplayPageSize() === nextPageSize) {
+    return;
+  }
+  state.search.displayPageSize = nextPageSize;
+  state.search.page = 1;
+  refreshSearchPagingResults();
 }
 
 function selectedRankingItems() {
@@ -863,6 +924,7 @@ function setSearchProvider(provider) {
 
   state.search = {
     ...state.search,
+    page: 1,
     provider: nextProvider
   };
   state.controlsDirty = false;
@@ -1726,6 +1788,7 @@ function rankingSectionSignature(options) {
   const selectedKeys = options.selectedKeys || new Set();
   return JSON.stringify({
     allowDownloadSelection: Boolean(options.allowDownloadSelection),
+    afterHeaderHtmlSignature: options.afterHeaderHtmlSignature || '',
     beforeHtmlSignature: options.beforeHtmlSignature || '',
     downloadSelectionMode: state.downloadSelectionMode,
     emptyText: options.emptyText,
@@ -1793,6 +1856,7 @@ function renderRankingSection(container, options) {
       </div>
       ${headerAside}
     </div>
+    ${options.afterHeaderHtml || ''}
 
     ${
       items.length
@@ -2168,6 +2232,109 @@ function bindSearchFilterControls(root = document) {
   });
 }
 
+function searchPaginationPages(currentPage, pageCount) {
+  const pages = new Set([1, pageCount]);
+  const leadingEnd = Math.min(5, pageCount);
+  for (let page = 2; page <= leadingEnd; page += 1) {
+    pages.add(page);
+  }
+  const windowStart = Math.max(1, currentPage - 2);
+  const windowEnd = Math.min(pageCount, currentPage + 2);
+  for (let page = windowStart; page <= windowEnd; page += 1) {
+    pages.add(page);
+  }
+
+  const sortedPages = [...pages].sort((left, right) => left - right);
+  const parts = [];
+  sortedPages.forEach((page, index) => {
+    const previousPage = sortedPages[index - 1];
+    if (index && page - previousPage > 1) {
+      parts.push('ellipsis');
+    }
+    parts.push(page);
+  });
+  return parts;
+}
+
+function renderSearchPagingControls(filteredCount) {
+  if (!filteredCount) {
+    return '';
+  }
+
+  const pageSize = searchDisplayPageSize();
+  const pageCount = getSearchPageCount(filteredCount);
+  const currentPage = clampSearchPage(filteredCount);
+  const startCount = (currentPage - 1) * pageSize + 1;
+  const endCount = Math.min(filteredCount, currentPage * pageSize);
+  const sizeOptions = SEARCH_DISPLAY_PAGE_SIZE_OPTIONS.map((option) => {
+    return `<option value="${option}" ${option === pageSize ? 'selected' : ''}>${option}</option>`;
+  }).join('');
+  const paginationHtml =
+    pageCount > 1
+      ? `
+          <div class="search-pagination-controls" aria-label="検索結果ページ">
+            <button
+              type="button"
+              class="search-page-button"
+              data-search-page="${currentPage - 1}"
+              aria-label="前のページ"
+              ${currentPage <= 1 ? 'disabled' : ''}
+            >
+              &lsaquo;
+            </button>
+            ${searchPaginationPages(currentPage, pageCount)
+              .map((page) => {
+                if (page === 'ellipsis') {
+                  return '<span class="search-page-ellipsis" aria-hidden="true">...</span>';
+                }
+                return `
+                  <button
+                    type="button"
+                    class="search-page-button ${page === currentPage ? 'active' : ''}"
+                    data-search-page="${page}"
+                    aria-current="${page === currentPage ? 'page' : 'false'}"
+                  >
+                    ${page}
+                  </button>
+                `;
+              })
+              .join('')}
+            <button
+              type="button"
+              class="search-page-button"
+              data-search-page="${currentPage + 1}"
+              aria-label="次のページ"
+              ${currentPage >= pageCount ? 'disabled' : ''}
+            >
+              &rsaquo;
+            </button>
+          </div>
+        `
+      : '';
+
+  return `
+    <div class="search-pagination-bar">
+      <label class="search-page-size-control">
+        <span>表示件数</span>
+        <select class="search-page-size-select" data-search-display-page-size>
+          ${sizeOptions}
+        </select>
+      </label>
+      <p class="search-page-status">${startCount}-${endCount} / ${filteredCount}件</p>
+      ${paginationHtml}
+    </div>
+  `;
+}
+
+function bindSearchPagingControls(root = document) {
+  root.querySelectorAll('[data-search-display-page-size]').forEach((select) => {
+    select.addEventListener('change', () => setSearchDisplayPageSize(select.value));
+  });
+  root.querySelectorAll('[data-search-page]').forEach((button) => {
+    button.addEventListener('click', () => setSearchPage(button.dataset.searchPage));
+  });
+}
+
 function renderSearchResults() {
   if (!elements.searchResults) {
     return;
@@ -2185,8 +2352,14 @@ function renderSearchResults() {
 
   const search = state.search;
   const totalSearchItems = currentSearchItems();
-  const searchItems = visibleSearchItems();
-  const itemMap = new Map(searchItems.map((item) => [getItemKey(item), item]));
+  const filteredSearchItems = visibleSearchItems();
+  const currentPage = clampSearchPage(filteredSearchItems);
+  const pageSize = searchDisplayPageSize();
+  const pageCount = getSearchPageCount(filteredSearchItems);
+  const searchItems = paginatedSearchItems(filteredSearchItems);
+  const startCount = filteredSearchItems.length ? (currentPage - 1) * pageSize + 1 : 0;
+  const endCount = filteredSearchItems.length ? Math.min(filteredSearchItems.length, currentPage * pageSize) : 0;
+  const itemMap = new Map(filteredSearchItems.map((item) => [getItemKey(item), item]));
   const activePreviewItems = state.activeSearchPreviewKeys.map((key) => itemMap.get(key)).filter(Boolean);
   const showBrowserControls = isDesktopBrowserExperience();
   const allowInlinePlayback = showBrowserControls && state.tab === 'search';
@@ -2195,9 +2368,11 @@ function renderSearchResults() {
     ? `${searchProviderLabel(search.provider)}検索を実行中です。`
     : search.error
       ? search.error
-      : searchItems.length
-        ? `${searchProviderLabel(search.provider)} ${searchItems.length}件を表示中${
-            totalSearchItems.length !== searchItems.length ? ` / 絞り込み前${totalSearchItems.length}件` : search.total ? ` / 全${search.total}件` : ''
+      : filteredSearchItems.length
+        ? `${searchProviderLabel(search.provider)} ${startCount}-${endCount}件を表示中${
+            pageCount > 1 ? ` / ${pageCount}ページ中${currentPage}ページ` : ''
+          }${
+            totalSearchItems.length !== filteredSearchItems.length ? ` / 絞り込み前${totalSearchItems.length}件` : search.total ? ` / 全${search.total}件` : ''
           }`
         : totalSearchItems.length && areSearchFiltersActive()
           ? `${searchProviderLabel(search.provider)} 0件を表示中 / 絞り込み前${totalSearchItems.length}件`
@@ -2236,9 +2411,17 @@ function renderSearchResults() {
       })}
     </div>
   `;
+  const searchPagingHtml = renderSearchPagingControls(filteredSearchItems.length);
   const focusSnapshot = captureActressSearchFocus(elements.searchResults);
 
   renderRankingSection(elements.searchResults, {
+    afterHeaderHtml: searchPagingHtml,
+    afterHeaderHtmlSignature: JSON.stringify({
+      currentPage,
+      filteredCount: filteredSearchItems.length,
+      pageCount,
+      pageSize
+    }),
     beforeHtml: mobileSearchFormHtml,
     beforeHtmlSignature: JSON.stringify({
       loading: search.loading,
@@ -2278,6 +2461,10 @@ function renderSearchResults() {
       showBrowserControls,
       statusText,
       filters: state.searchFilters,
+      currentPage,
+      filteredSearchItems: filteredSearchItems.length,
+      pageCount,
+      pageSize,
       totalSearchItems: totalSearchItems.length,
       total: search.total
     }),
@@ -2287,6 +2474,7 @@ function renderSearchResults() {
     onAfterRender: () => {
       bindActressSearchForms(elements.searchResults);
       bindSearchFilterControls(elements.searchResults);
+      bindSearchPagingControls(elements.searchResults);
       restoreActressSearchFocus(focusSnapshot);
       elements.searchResults?.querySelectorAll('[data-search-selection-toggle]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -3380,11 +3568,14 @@ async function searchActress(queryOverride = null) {
   }
 
   const provider = normalizeSearchProvider(state.search.provider);
+  const displayPageSize = searchDisplayPageSize();
   state.search = {
     ...state.search,
+    displayPageSize,
     error: '',
     items: [],
     loading: true,
+    page: 1,
     provider,
     query: keyword,
     total: 0
@@ -3407,10 +3598,12 @@ async function searchActress(queryOverride = null) {
     });
     const result = await requestJson(`/api/search/actress?${params.toString()}`);
     state.search = {
+      displayPageSize: searchDisplayPageSize(),
       error: '',
       fetchedAt: result.search?.fetchedAt || null,
       items: result.search?.items || [],
       loading: false,
+      page: 1,
       pageSize: result.search?.pageSize || 0,
       pagesFetched: result.search?.pagesFetched || 0,
       provider: normalizeSearchProvider(result.search?.searchProvider || provider),
