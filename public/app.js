@@ -135,7 +135,7 @@ function getProductCode(item) {
 }
 
 function isSearchPreviewable(item) {
-  return Boolean(item?.seasonId || item?.playbackUrl);
+  return Boolean(item?.seasonId || item?.playbackUrl || item?.detailUrl);
 }
 
 function splitActressNames(value) {
