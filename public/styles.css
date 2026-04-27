@@ -233,6 +233,42 @@ a:hover {
   min-width: 0;
 }
 
+.search-provider-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 32px);
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--pill-radius);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.search-provider-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-height: 34px;
+  border: 0;
+  border-radius: var(--pill-radius);
+  background: transparent;
+  color: var(--text-inverse-soft);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.search-provider-option.active {
+  background: #ffffff;
+  color: var(--brand);
+  box-shadow: var(--shadow-card);
+}
+
+.search-provider-option:active {
+  transform: scale(0.96);
+}
+
 .search-mobile-panel {
   display: none;
 }
@@ -262,6 +298,22 @@ a:hover {
 .search-mobile-panel .header-search-input {
   width: 100%;
   border-color: var(--line-strong);
+}
+
+.search-mobile-panel .search-provider-switch,
+.mobile-sidebar-actions .search-provider-switch {
+  border-color: var(--line);
+  background: #f7f4ee;
+}
+
+.search-mobile-panel .search-provider-option,
+.mobile-sidebar-actions .search-provider-option {
+  color: var(--text-soft);
+}
+
+.search-mobile-panel .search-provider-option.active,
+.mobile-sidebar-actions .search-provider-option.active {
+  color: var(--brand);
 }
 
 .search-mobile-panel .header-command-button {
@@ -1050,6 +1102,19 @@ tbody tr:hover {
   gap: 10px;
 }
 
+.search-filter-controls {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.filter-toggle-button {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 0.78rem;
+}
+
 .favorite-header-play-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
@@ -1210,6 +1275,7 @@ tbody tr:hover {
 }
 
 .ranking-card-title,
+.ranking-card-code,
 .ranking-card-actress {
   margin: 0;
   color: var(--text);
@@ -1222,6 +1288,7 @@ tbody tr:hover {
   font-weight: 700;
 }
 
+.ranking-card-code,
 .ranking-card-actress {
   flex: 1 1 auto;
   min-width: 0;
@@ -1572,6 +1639,7 @@ tbody tr:hover {
 
 .favorite-preview-status,
 .favorite-preview-title,
+.favorite-preview-code,
 .favorite-preview-subtitle {
   margin: 0;
 }
@@ -1622,6 +1690,7 @@ tbody tr:hover {
   border-color: rgba(154, 106, 0, 0.28);
 }
 
+.favorite-preview-code,
 .favorite-preview-subtitle {
   color: var(--text-soft);
   font-size: 0.84rem;
@@ -2181,6 +2250,7 @@ tbody tr:hover {
   }
 
   .ranking-card-title,
+  .ranking-card-code,
   .ranking-card-actress {
     font-size: 10px;
   }
@@ -2276,6 +2346,7 @@ tbody tr:hover {
     font-size: 12px;
   }
 
+  .ranking-card-code,
   .ranking-card-actress {
     font-size: 11px;
   }

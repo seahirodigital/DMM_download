@@ -37,11 +37,16 @@ const state = {
     loading: false,
     pageSize: 0,
     pagesFetched: 0,
+    provider: 'fanza',
     query: '',
     sourcePageUrl: '',
     total: 0
   },
   searchDraft: null,
+  searchFilters: {
+    castType: '',
+    dateSort: ''
+  },
   selectedDownloadKeys: new Set(),
   selectedFavoriteKeys: new Set(),
   selectedSearchKeys: new Set(),
@@ -97,8 +102,118 @@ function currentSearchItems() {
   return state.search?.items || [];
 }
 
+function normalizeSearchProvider(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'd' || normalized === 'dmm' || normalized === 'dmm.com' ? 'dmm' : 'fanza';
+}
+
+function searchProviderLabel(provider = state.search.provider) {
+  return normalizeSearchProvider(provider) === 'dmm' ? 'DMM' : 'FANZA';
+}
+
+function formatProductCode(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const normalized = raw
+    .normalize('NFKC')
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[^0-9a-z]/gi, '');
+  const match = /([a-z]+)0*(\d+[a-z]?)$/i.exec(normalized);
+  if (!match) {
+    return raw.toUpperCase();
+  }
+
+  const number = match[2].replace(/^0+(?=\d)/, '').toUpperCase();
+  return `${match[1].toUpperCase()}-${number}`;
+}
+
+function getProductCode(item) {
+  return formatProductCode(item?.productCode || item?.contentId || item?.seasonId || '');
+}
+
 function isSearchPreviewable(item) {
   return Boolean(item?.seasonId || item?.playbackUrl);
+}
+
+function splitActressNames(value) {
+  return String(value || '')
+    .split(/\s*(?:,|、|，|\/|／|&|＆)\s*/)
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+function getSearchItemCastType(item) {
+  const count = Number(item?.actressCount);
+  if (Number.isFinite(count) && count > 1) {
+    return 'multi';
+  }
+  if (Number.isFinite(count) && count === 1) {
+    return 'single';
+  }
+  return splitActressNames(item?.actress).length > 1 ? 'multi' : 'single';
+}
+
+function getSearchItemDateValue(item) {
+  const time = Date.parse(item?.releaseDate || item?.date || item?.fetchedAt || '');
+  return Number.isFinite(time) ? time : 0;
+}
+
+function areSearchFiltersActive() {
+  return Boolean(state.searchFilters.castType || state.searchFilters.dateSort);
+}
+
+function visibleSearchItems() {
+  const filters = state.searchFilters;
+  let items = currentSearchItems();
+  if (filters.castType) {
+    items = items.filter((item) => getSearchItemCastType(item) === filters.castType);
+  }
+  if (filters.dateSort) {
+    const direction = filters.dateSort === 'asc' ? 1 : -1;
+    items = [...items].sort((left, right) => {
+      const dateDelta = (getSearchItemDateValue(left) - getSearchItemDateValue(right)) * direction;
+      if (dateDelta) {
+        return dateDelta;
+      }
+      const rankDelta = Number(left.rank || 0) - Number(right.rank || 0);
+      return rankDelta || String(left.title || '').localeCompare(String(right.title || ''), 'ja');
+    });
+  }
+  return items;
+}
+
+function refreshSearchFilterResults() {
+  state.activeSearchPreviewKeys = [];
+  state.selectedSearchKeys.clear();
+  state.searchSelectionMode = false;
+  destroySearchPreviewPlayers();
+  state.renderCache.searchResults = '';
+  renderSearchResults();
+  syncSearchSelectionControls();
+}
+
+function setSearchCastFilter(type) {
+  state.searchFilters.castType = state.searchFilters.castType === type ? '' : type;
+  refreshSearchFilterResults();
+}
+
+function setSearchDateSort(sort) {
+  state.searchFilters.dateSort = state.searchFilters.dateSort === sort ? '' : sort;
+  refreshSearchFilterResults();
+}
+
+function resetSearchFilters() {
+  if (!areSearchFiltersActive()) {
+    return;
+  }
+  state.searchFilters = {
+    castType: '',
+    dateSort: ''
+  };
+  refreshSearchFilterResults();
 }
 
 function selectedRankingItems() {
@@ -168,7 +283,7 @@ function pruneFavoriteSelection() {
 }
 
 function pruneSearchSelection() {
-  const validKeys = new Set(currentSearchItems().filter(isSearchPreviewable).map(getItemKey).filter(Boolean));
+  const validKeys = new Set(visibleSearchItems().filter(isSearchPreviewable).map(getItemKey).filter(Boolean));
   for (const key of [...state.selectedSearchKeys]) {
     if (!validKeys.has(key)) {
       state.selectedSearchKeys.delete(key);
@@ -181,7 +296,7 @@ function pruneFavoritePreviewKeys() {
 }
 
 function pruneSearchPreviewKeys() {
-  const validKeys = new Set(currentSearchItems().filter(isSearchPreviewable).map(getItemKey).filter(Boolean));
+  const validKeys = new Set(visibleSearchItems().filter(isSearchPreviewable).map(getItemKey).filter(Boolean));
   state.activeSearchPreviewKeys = state.activeSearchPreviewKeys.filter((key) => validKeys.has(key));
 }
 
@@ -231,7 +346,7 @@ function toggleSearchSelectionMode() {
 }
 
 function toggleSearchSelection(key, isSelected = !state.selectedSearchKeys.has(key)) {
-  if (!key || !currentSearchItems().some((item) => getItemKey(item) === key && isSearchPreviewable(item))) {
+  if (!key || !visibleSearchItems().some((item) => getItemKey(item) === key && isSearchPreviewable(item))) {
     return;
   }
 
@@ -317,10 +432,13 @@ function handleSelectionPlayShortcut(event) {
 function normalizeFavoriteItem(item) {
   return {
     actress: item.actress || '',
+    actressCount: item.actressCount || 0,
     contentId: item.contentId || '',
     detailUrl: item.detailUrl || '',
     playbackUrl: item.playbackUrl || '',
+    productCode: getProductCode(item),
     rank: item.rank ?? '',
+    releaseDate: item.releaseDate || '',
     searchUrl: item.searchUrl || '',
     seasonId: item.seasonId || '',
     sourcePageUrl: item.sourcePageUrl || '',
@@ -654,6 +772,7 @@ function renderActressSearchForm(options = {}) {
   const { extraClass = '', idPrefix = '' } = options;
   const prefix = idPrefix ? `${idPrefix}-` : '';
   const inputValue = state.searchDraft ?? state.search.query;
+  const provider = normalizeSearchProvider(state.search.provider);
   return `
     <form id="${prefix}actress-search-form" class="header-search-form ${escapeHtml(extraClass)}" data-actress-search-form>
       <label class="header-control header-search-control">
@@ -668,6 +787,26 @@ function renderActressSearchForm(options = {}) {
           placeholder="女優名で検索"
         />
       </label>
+      <div class="search-provider-switch" role="group" aria-label="検索先">
+        <button
+          class="search-provider-option ${provider === 'dmm' ? 'active' : ''}"
+          type="button"
+          data-search-provider="dmm"
+          aria-pressed="${provider === 'dmm' ? 'true' : 'false'}"
+          title="DMMで検索"
+        >
+          D
+        </button>
+        <button
+          class="search-provider-option ${provider === 'fanza' ? 'active' : ''}"
+          type="button"
+          data-search-provider="fanza"
+          aria-pressed="${provider === 'fanza' ? 'true' : 'false'}"
+          title="FANZAで検索"
+        >
+          F
+        </button>
+      </div>
       <button class="header-command-button actress-search-submit" type="submit" title="Search" aria-label="Search actress" ${state.search.loading ? 'disabled' : ''}>
         <span aria-hidden="true">${state.search.loading ? '&hellip;' : '&#128269;'}</span>
       </button>
@@ -716,6 +855,22 @@ function syncActressSearchInputs(value, sourceInput = null) {
   });
 }
 
+function setSearchProvider(provider) {
+  const nextProvider = normalizeSearchProvider(provider);
+  if (state.search.provider === nextProvider) {
+    return;
+  }
+
+  state.search = {
+    ...state.search,
+    provider: nextProvider
+  };
+  state.controlsDirty = false;
+  state.renderCache.searchResults = '';
+  renderHeaderActions();
+  renderSearchResults();
+}
+
 function bindActressSearchForms(root = document) {
   root.querySelectorAll('[data-actress-search-form]').forEach((form) => {
     const input = form.querySelector('[data-actress-search-input]');
@@ -727,6 +882,11 @@ function bindActressSearchForms(root = document) {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       searchActress(input?.value || '');
+    });
+    form.querySelectorAll('[data-search-provider]').forEach((button) => {
+      button.addEventListener('click', () => {
+        setSearchProvider(button.dataset.searchProvider);
+      });
     });
   });
 }
@@ -1586,6 +1746,7 @@ function rankingSectionSignature(options) {
         favorite: isFavorite(item),
         key,
         playbackUrl: buildCardPlaybackUrl(item),
+        productCode: getProductCode(item),
         previewable: options.isPreviewable
           ? Boolean(options.isPreviewable(item))
           : Boolean(item.seasonId || item.playbackUrl || item.detailUrl),
@@ -1641,6 +1802,7 @@ function renderRankingSection(container, options) {
                 const key = getItemKey(item);
                 const selectionKey = getSelectionKey(item, selectionKind);
                 const playbackUrl = buildCardPlaybackUrl(item);
+                const productCode = getProductCode(item);
                 const hasPreview = options.isPreviewable
                   ? Boolean(options.isPreviewable(item))
                   : Boolean(item.seasonId || item.playbackUrl || item.detailUrl);
@@ -1709,6 +1871,7 @@ function renderRankingSection(container, options) {
                     ${thumbnail}
                     <div class="ranking-card-meta">
                       <p class="ranking-card-title">${escapeHtml(item.title || '-')}</p>
+                      <p class="ranking-card-code">${escapeHtml(productCode || '-')}</p>
                       <div class="ranking-card-subrow">
                         <p class="ranking-card-actress">${escapeHtml(item.actress || '-')}</p>
                         <div class="ranking-card-actions">
@@ -1945,6 +2108,66 @@ function renderDashboardRanking() {
   });
 }
 
+function renderSearchFilterControls() {
+  const filters = state.searchFilters;
+  return `
+    <div class="search-filter-controls" aria-label="検索結果フィルター">
+      <button
+        type="button"
+        class="header-command-button filter-toggle-button ${filters.castType === 'single' ? 'active' : ''}"
+        data-search-cast-filter="single"
+        aria-pressed="${filters.castType === 'single' ? 'true' : 'false'}"
+      >
+        単体
+      </button>
+      <button
+        type="button"
+        class="header-command-button filter-toggle-button ${filters.castType === 'multi' ? 'active' : ''}"
+        data-search-cast-filter="multi"
+        aria-pressed="${filters.castType === 'multi' ? 'true' : 'false'}"
+      >
+        企画
+      </button>
+      <button
+        type="button"
+        class="header-command-button filter-toggle-button ${filters.dateSort === 'asc' ? 'active' : ''}"
+        data-search-date-sort="asc"
+        aria-pressed="${filters.dateSort === 'asc' ? 'true' : 'false'}"
+      >
+        日付↑
+      </button>
+      <button
+        type="button"
+        class="header-command-button filter-toggle-button ${filters.dateSort === 'desc' ? 'active' : ''}"
+        data-search-date-sort="desc"
+        aria-pressed="${filters.dateSort === 'desc' ? 'true' : 'false'}"
+      >
+        日付↓
+      </button>
+      <button
+        type="button"
+        class="header-command-button filter-toggle-button danger-outline"
+        data-search-filters-reset
+        ${areSearchFiltersActive() ? '' : 'disabled'}
+      >
+        OFF
+      </button>
+    </div>
+  `;
+}
+
+function bindSearchFilterControls(root = document) {
+  root.querySelectorAll('[data-search-cast-filter]').forEach((button) => {
+    button.addEventListener('click', () => setSearchCastFilter(button.dataset.searchCastFilter));
+  });
+  root.querySelectorAll('[data-search-date-sort]').forEach((button) => {
+    button.addEventListener('click', () => setSearchDateSort(button.dataset.searchDateSort));
+  });
+  root.querySelectorAll('[data-search-filters-reset]').forEach((button) => {
+    button.addEventListener('click', resetSearchFilters);
+  });
+}
+
 function renderSearchResults() {
   if (!elements.searchResults) {
     return;
@@ -1961,7 +2184,8 @@ function renderSearchResults() {
   pruneSearchPreviewKeys();
 
   const search = state.search;
-  const searchItems = currentSearchItems();
+  const totalSearchItems = currentSearchItems();
+  const searchItems = visibleSearchItems();
   const itemMap = new Map(searchItems.map((item) => [getItemKey(item), item]));
   const activePreviewItems = state.activeSearchPreviewKeys.map((key) => itemMap.get(key)).filter(Boolean);
   const showBrowserControls = isDesktopBrowserExperience();
@@ -1972,11 +2196,16 @@ function renderSearchResults() {
     : search.error
       ? search.error
       : searchItems.length
-        ? `${searchItems.length}件を表示中${search.total ? ` / 全${search.total}件` : ''}`
-        : 'ヘッダーの検索フォームから女優名を入力してください。';
+        ? `${searchProviderLabel(search.provider)} ${searchItems.length}件を表示中${
+            totalSearchItems.length !== searchItems.length ? ` / 絞り込み前${totalSearchItems.length}件` : search.total ? ` / 全${search.total}件` : ''
+          }`
+        : totalSearchItems.length && areSearchFiltersActive()
+          ? `${searchProviderLabel(search.provider)} 0件を表示中 / 絞り込み前${totalSearchItems.length}件`
+          : 'ヘッダーの検索フォームから女優名を入力してください。';
   const headerAsideHtml = showBrowserControls
     ? `
         <div class="ranking-header-actions">
+          ${renderSearchFilterControls()}
           <button
             type="button"
             class="header-command-button ${state.searchSelectionMode ? 'active' : ''}"
@@ -2013,11 +2242,16 @@ function renderSearchResults() {
     beforeHtml: mobileSearchFormHtml,
     beforeHtmlSignature: JSON.stringify({
       loading: search.loading,
+      provider: search.provider,
       query: search.query
     }),
     cacheKey: 'searchResults',
-    emptyText: search.query ? '該当するコンテンツは見つかりませんでした。' : '検索キーワードを入力してください。',
-    eyebrow: 'DMM検索',
+    emptyText: search.query
+      ? areSearchFiltersActive()
+        ? 'フィルター条件に合うコンテンツは見つかりませんでした。'
+        : '該当するコンテンツは見つかりませんでした。'
+      : '検索キーワードを入力してください。',
+    eyebrow: `${searchProviderLabel(search.provider)}検索`,
     footerHtml:
       allowInlinePlayback && activePreviewItems.length
         ? renderInlinePreviewSection(activePreviewItems, {
@@ -2037,11 +2271,14 @@ function renderSearchResults() {
       fetchedAt: search.fetchedAt,
       loading: search.loading,
       pagesFetched: search.pagesFetched,
+      provider: search.provider,
       query: search.query,
       selectedCount,
       selectionMode: state.searchSelectionMode,
       showBrowserControls,
       statusText,
+      filters: state.searchFilters,
+      totalSearchItems: totalSearchItems.length,
       total: search.total
     }),
     isPreviewable: isSearchPreviewable,
@@ -2049,6 +2286,7 @@ function renderSearchResults() {
     items: searchItems,
     onAfterRender: () => {
       bindActressSearchForms(elements.searchResults);
+      bindSearchFilterControls(elements.searchResults);
       restoreActressSearchFocus(focusSnapshot);
       elements.searchResults?.querySelectorAll('[data-search-selection-toggle]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -2160,6 +2398,7 @@ function renderInlinePreviewSection(items, options = {}) {
           .map((item) => {
             const key = getItemKey(item);
             const favorite = isFavorite(item);
+            const productCode = getProductCode(item);
             return `
               <article class="favorite-preview-card" data-inline-preview-card-key="${escapeHtml(key)}">
                 <button
@@ -2201,6 +2440,7 @@ function renderInlinePreviewSection(items, options = {}) {
                         : ''
                     }
                   </div>
+                  <p class="favorite-preview-code">${escapeHtml(productCode || '-')}</p>
                   <p class="favorite-preview-subtitle">${escapeHtml(item.actress || '-')}</p>
                 </div>
               </article>
@@ -2562,7 +2802,7 @@ function closeSearchInlinePreviews() {
 }
 
 function openSearchInlinePreviews(keys) {
-  const itemMap = new Map(currentSearchItems().map((item) => [getItemKey(item), item]));
+  const itemMap = new Map(visibleSearchItems().map((item) => [getItemKey(item), item]));
   const requestedKeys = [...new Set(keys || [])];
   const nextItems = requestedKeys.map((key) => itemMap.get(key)).filter(isSearchPreviewable);
   if (!nextItems.length) {
@@ -3000,6 +3240,9 @@ async function refreshHistory() {
 async function refreshState(options = {}) {
   const stateUrl = options.initial ? '/api/state?initial=1' : '/api/state';
   state.snapshot = await requestJson(stateUrl);
+  if (options.initial && !state.snapshot?.config?.affiliate?.hasAffiliateApiCredentials) {
+    state.search.provider = 'dmm';
+  }
   syncFavoritesWithRanking();
   pruneDownloadSelection();
   renderWarnings();
@@ -3136,11 +3379,13 @@ async function searchActress(queryOverride = null) {
     return;
   }
 
+  const provider = normalizeSearchProvider(state.search.provider);
   state.search = {
     ...state.search,
     error: '',
     items: [],
     loading: true,
+    provider,
     query: actress,
     total: 0
   };
@@ -3157,7 +3402,8 @@ async function searchActress(queryOverride = null) {
   try {
     const params = new URLSearchParams({
       actress,
-      pageSize: '100'
+      pageSize: '100',
+      provider
     });
     const result = await requestJson(`/api/search/actress?${params.toString()}`);
     state.search = {
@@ -3167,6 +3413,7 @@ async function searchActress(queryOverride = null) {
       loading: false,
       pageSize: result.search?.pageSize || 0,
       pagesFetched: result.search?.pagesFetched || 0,
+      provider: normalizeSearchProvider(result.search?.searchProvider || provider),
       query: result.search?.query || actress,
       sourcePageUrl: result.search?.sourcePageUrl || '',
       total: result.search?.total || 0
@@ -3174,7 +3421,7 @@ async function searchActress(queryOverride = null) {
     state.renderCache.searchResults = '';
     renderHeaderActions();
     renderSearchResults();
-    showMessage(`${state.search.query} の検索結果を取得しました。`, 'success');
+    showMessage(`${state.search.query} の${searchProviderLabel(state.search.provider)}検索結果を取得しました。`, 'success');
   } catch (error) {
     state.search = {
       ...state.search,
