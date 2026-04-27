@@ -1748,6 +1748,15 @@ tbody tr:hover {
   line-height: 1.35;
 }
 
+.favorite-preview-title-text,
+.favorite-preview-inline-detail {
+  min-width: 0;
+}
+
+.favorite-preview-inline-detail {
+  display: none;
+}
+
 .favorite-preview-title-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2622,7 +2631,46 @@ tbody tr:hover {
   body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-card,
   body.ipad-inline-layout #favorites-content.inline-preview-active .favorite-preview-card,
   body.ipad-inline-layout #search-results.inline-preview-active .favorite-preview-card {
+    gap: 6px;
     padding: 12px;
+  }
+
+  body.ipad-inline-layout .favorite-preview-meta {
+    gap: 0;
+  }
+
+  body.ipad-inline-layout .favorite-preview-title {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  body.ipad-inline-layout .favorite-preview-title-text,
+  body.ipad-inline-layout .favorite-preview-inline-detail {
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.ipad-inline-layout .favorite-preview-title-text {
+    flex: 1 1 auto;
+  }
+
+  body.ipad-inline-layout .favorite-preview-inline-detail {
+    flex: 0 2 auto;
+    max-width: 28%;
+    color: var(--text-soft);
+    font-size: 0.86em;
+    font-weight: 700;
+  }
+
+  body.ipad-inline-layout .favorite-preview-code,
+  body.ipad-inline-layout .favorite-preview-subtitle {
+    display: none;
   }
 }
 
