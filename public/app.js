@@ -1,5 +1,6 @@
 const state = {
   activeDashboardPreviewKeys: [],
+  activeDashboardPreviewItems: new Map(),
   activeFavoritePreviewKeys: [],
   activeInlinePreviewAudioKey: '',
   activeSearchPreviewKeys: [],
@@ -13,6 +14,7 @@ const state = {
   favorites: {},
   headerActionsMode: '',
   history: [],
+  cachedRankingItems: [],
   library: {
     directory: '',
     error: null,
@@ -108,7 +110,22 @@ function getDownloadKey(item) {
 }
 
 function currentRankingItems() {
-  return state.snapshot?.ranking?.items || [];
+  const items = state.snapshot?.ranking?.items || [];
+  if (items.length) {
+    return items;
+  }
+
+  if (state.activeDashboardPreviewKeys.length || state.downloadSelectionMode || state.selectedDownloadKeys.size) {
+    return state.cachedRankingItems;
+  }
+
+  return [];
+}
+
+function cacheRankingItems(items = []) {
+  if (Array.isArray(items) && items.length) {
+    state.cachedRankingItems = items;
+  }
 }
 
 function currentSearchItems() {
@@ -2218,13 +2235,18 @@ function renderDashboardRanking() {
     state.activeDashboardPreviewKeys = [];
   }
 
-  const rankingItems = state.snapshot?.ranking?.items || [];
-  const itemMap = new Map(rankingItems.map((item) => [getItemKey(item), item]));
+  const rankingItems = currentRankingItems();
+  cacheRankingItems(rankingItems);
+  const itemMap = new Map([
+    ...state.activeDashboardPreviewItems,
+    ...rankingItems.map((item) => [getItemKey(item), item])
+  ]);
   const activePreviewItems = state.activeDashboardPreviewKeys.map((key) => itemMap.get(key)).filter(Boolean);
+  const displayItems = rankingItems.length ? rankingItems : activePreviewItems;
   const showBrowserControls = canUseInlinePreviewExperience();
   const allowInlinePlayback = showBrowserControls && state.tab === 'dashboard';
   const selectedCount = state.selectedDownloadKeys.size;
-  const statusText = rankingItems.length ? `${rankingItems.length}件を読み込み済み` : 'ランキング取得を実行するとここに表示されます。';
+  const statusText = displayItems.length ? `${displayItems.length}件を読み込み済み` : 'ランキング取得を実行するとここに表示されます。';
   const headerAsideHtml = showBrowserControls
     ? `
         <div class="ranking-header-actions">
@@ -2277,7 +2299,7 @@ function renderDashboardRanking() {
     }),
     inlinePreviewAction: 'dashboard',
     inlinePreviewActive: allowInlinePlayback && activePreviewItems.length > 0,
-    items: rankingItems,
+    items: displayItems,
     onAfterRender: () => {
       elements.dashboardRanking?.querySelectorAll('[data-dashboard-selection-toggle]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -2837,6 +2859,7 @@ function removeDashboardInlinePreview(key) {
 
   const item = currentRankingItems().find((entry) => getItemKey(entry) === key);
   state.activeDashboardPreviewKeys = state.activeDashboardPreviewKeys.filter((entryKey) => entryKey !== key);
+  state.activeDashboardPreviewItems.delete(key);
   if (item) {
     state.selectedDownloadKeys.delete(getDownloadKey(item));
   }
@@ -3101,6 +3124,7 @@ async function mountDashboardInlinePreviews(items, mountToken = currentInlinePre
 function closeDashboardInlinePreviews() {
   destroyDashboardPreviewPlayers();
   state.activeDashboardPreviewKeys = [];
+  state.activeDashboardPreviewItems.clear();
   renderDashboardRanking();
 }
 
@@ -3113,7 +3137,9 @@ function openDashboardInlinePreviews(keys) {
   }
 
   state.activeDashboardPreviewKeys = nextItems.map(getItemKey);
+  state.activeDashboardPreviewItems = new Map(nextItems.map((item) => [getItemKey(item), item]));
   state.activeInlinePreviewAudioKey = state.activeDashboardPreviewKeys[0] || '';
+  cacheRankingItems(currentRankingItems().length ? currentRankingItems() : nextItems);
   state.renderCache.dashboardRanking = '';
   renderDashboardRanking();
   window.requestAnimationFrame(() => {
@@ -3654,6 +3680,7 @@ async function refreshHistory() {
 async function refreshState(options = {}) {
   const stateUrl = options.initial ? '/api/state?initial=1' : '/api/state';
   state.snapshot = await requestJson(stateUrl);
+  cacheRankingItems(state.snapshot?.ranking?.items || []);
   if (options.initial && !state.snapshot?.config?.affiliate?.hasAffiliateApiCredentials) {
     state.search.provider = 'dmm';
   }
