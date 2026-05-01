@@ -342,6 +342,7 @@ async function createApp() {
       downloads: downloadManager.getStatus(),
       historySummary: stateStore.buildSummary(),
       ranking: stateStore.getRanking(),
+      favorites: stateStore.getFavorites(),
       settings: stateStore.getSettings(),
       warnings
     };
@@ -893,6 +894,21 @@ async function createApp() {
     });
   }
 
+  async function handleGetFavorites(response) {
+    sendJson(response, 200, {
+      favorites: stateStore.getFavorites()
+    });
+  }
+
+  async function handleSaveFavorites(request, response) {
+    const body = await readRequestBody(request);
+    const favorites = await stateStore.setFavorites(body.favorites || {});
+    sendJson(response, 200, {
+      ok: true,
+      favorites
+    });
+  }
+
   async function handleHistory(url, response) {
     const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit') || 250)));
     sendJson(response, 200, {
@@ -1215,6 +1231,16 @@ async function createApp() {
 
       if (request.method === 'POST' && requestUrl.pathname === '/api/settings') {
         await handleSettings(request, response);
+        return;
+      }
+
+      if (request.method === 'GET' && requestUrl.pathname === '/api/favorites') {
+        await handleGetFavorites(response);
+        return;
+      }
+
+      if (request.method === 'PUT' && requestUrl.pathname === '/api/favorites') {
+        await handleSaveFavorites(request, response);
         return;
       }
 

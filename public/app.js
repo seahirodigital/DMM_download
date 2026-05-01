@@ -32,6 +32,7 @@ const state = {
     favorites: '',
     searchResults: ''
   },
+  serverFavoritesLoaded: false,
   search: {
     backgroundError: '',
     backgroundLoading: false,
@@ -606,6 +607,34 @@ function saveFavorites() {
   window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(state.favorites));
 }
 
+function mergeFavorites(...sources) {
+  const merged = {};
+  for (const source of sources) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+      continue;
+    }
+    for (const [key, item] of Object.entries(source)) {
+      if (key && item && typeof item === 'object' && !Array.isArray(item)) {
+        merged[key] = item;
+      }
+    }
+  }
+  return merged;
+}
+
+async function persistFavoritesToServer() {
+  try {
+    await requestJson('/api/favorites', {
+      body: JSON.stringify({
+        favorites: state.favorites
+      }),
+      method: 'PUT'
+    });
+  } catch (error) {
+    console.warn('[favorites] server sync failed', error);
+  }
+}
+
 function isFavorite(item) {
   return Boolean(state.favorites[getItemKey(item)]);
 }
@@ -623,6 +652,7 @@ function toggleFavorite(item) {
   }
 
   saveFavorites();
+  persistFavoritesToServer();
   pruneFavoriteSelection();
   pruneFavoritePreviewKeys();
   renderDashboardRanking();
@@ -649,6 +679,8 @@ function syncFavoritesWithRanking() {
   if (changed) {
     saveFavorites();
   }
+
+  return changed;
 }
 
 function formatDate(value) {
@@ -1960,6 +1992,25 @@ function disposeInlinePreviewCard(card) {
   card?.remove?.();
 }
 
+function syncInlinePreviewCardControls(preservedCard, nextCard) {
+  const preservedFavorite = preservedCard?.querySelector?.('[data-inline-preview-favorite]');
+  const nextFavorite = nextCard?.querySelector?.('[data-inline-preview-favorite]');
+  if (preservedFavorite && nextFavorite) {
+    preservedFavorite.classList.toggle('active', nextFavorite.classList.contains('active'));
+    preservedFavorite.setAttribute('aria-label', nextFavorite.getAttribute('aria-label') || '');
+    preservedFavorite.setAttribute('aria-pressed', nextFavorite.getAttribute('aria-pressed') || 'false');
+    preservedFavorite.setAttribute('title', nextFavorite.getAttribute('title') || '');
+    preservedFavorite.innerHTML = nextFavorite.innerHTML;
+  }
+
+  const preservedRemove = preservedCard?.querySelector?.('[data-inline-preview-remove-key]');
+  const nextRemove = nextCard?.querySelector?.('[data-inline-preview-remove-key]');
+  if (preservedRemove && nextRemove) {
+    preservedRemove.setAttribute('aria-label', nextRemove.getAttribute('aria-label') || '');
+    preservedRemove.setAttribute('title', nextRemove.getAttribute('title') || '');
+  }
+}
+
 function restoreInlinePreviewCards(container, preservedCards) {
   if (!container || !preservedCards?.size) {
     return;
@@ -1973,6 +2024,7 @@ function restoreInlinePreviewCards(container, preservedCards) {
       return;
     }
     restoredKeys.add(key);
+    syncInlinePreviewCardControls(preserved.card, nextCard);
     nextCard.replaceWith(preserved.card);
 
     const video = preserved.card.querySelector('[data-inline-preview-video]');
@@ -2314,7 +2366,9 @@ function renderDashboardRanking() {
             showFavoriteToggle: true
           })
         : '',
-    footerSignature: allowInlinePlayback ? activePreviewItems.map(getItemKey).join(',') : '',
+    footerSignature: allowInlinePlayback
+      ? activePreviewItems.map((item) => `${getItemKey(item)}:${isFavorite(item) ? '1' : '0'}`).join(',')
+      : '',
     headerAsideHtml,
     headerAsideSignature: JSON.stringify({
       activePreviewCount: activePreviewItems.length,
@@ -2678,7 +2732,9 @@ function renderSearchResults() {
             showFavoriteToggle: true
           })
         : '',
-    footerSignature: allowInlinePlayback ? activePreviewItems.map(getItemKey).join(',') : '',
+    footerSignature: allowInlinePlayback
+      ? activePreviewItems.map((item) => `${getItemKey(item)}:${isFavorite(item) ? '1' : '0'}`).join(',')
+      : '',
     headerAsideHtml,
     headerAsideSignature: JSON.stringify({
       activePreviewCount: activePreviewItems.length,
@@ -3008,6 +3064,24 @@ function bindInlinePreviewRemoveControls(container) {
   });
 }
 
+function bindInlinePreviewFavoriteControls(container, itemMap) {
+  container?.querySelectorAll('[data-inline-preview-favorite]').forEach((button) => {
+    if (button.dataset.inlinePreviewFavoriteBound === 'true') {
+      return;
+    }
+    button.dataset.inlinePreviewFavoriteBound = 'true';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = button.dataset.inlinePreviewFavorite;
+      const item = itemMap.get(key);
+      if (item) {
+        toggleFavorite(item);
+      }
+    });
+  });
+}
+
 async function mountFavoriteInlinePreviews(items, mountToken = currentInlinePreviewToken('favorites')) {
   if (!elements.favoritesContent || !isInlinePreviewMountCurrent('favorites', mountToken)) {
     return;
@@ -3107,6 +3181,7 @@ async function mountDashboardInlinePreviews(items, mountToken = currentInlinePre
 
   const itemMap = new Map(items.map((item) => [getItemKey(item), item]));
   const videoElements = [...elements.dashboardRanking.querySelectorAll('[data-inline-preview-video]')];
+  bindInlinePreviewFavoriteControls(elements.dashboardRanking, itemMap);
 
   for (const [key, player] of state.dashboardPreviewPlayers.entries()) {
     if (!itemMap.has(key)) {
@@ -3165,21 +3240,7 @@ async function mountDashboardInlinePreviews(items, mountToken = currentInlinePre
   }
 
   bindInlinePreviewAudioFocus(elements.dashboardRanking);
-  elements.dashboardRanking.querySelectorAll('[data-inline-preview-favorite]').forEach((button) => {
-    if (button.dataset.inlinePreviewFavoriteBound === 'true') {
-      return;
-    }
-    button.dataset.inlinePreviewFavoriteBound = 'true';
-    button.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const key = button.dataset.inlinePreviewFavorite;
-      const item = itemMap.get(key);
-      if (item) {
-        toggleFavorite(item);
-      }
-    });
-  });
+  bindInlinePreviewFavoriteControls(elements.dashboardRanking, itemMap);
 }
 
 function closeDashboardInlinePreviews() {
@@ -3218,6 +3279,7 @@ async function mountSearchInlinePreviews(items, mountToken = currentInlinePrevie
 
   const itemMap = new Map(items.map((item) => [getItemKey(item), item]));
   const videoElements = [...elements.searchResults.querySelectorAll('[data-inline-preview-video]')];
+  bindInlinePreviewFavoriteControls(elements.searchResults, itemMap);
 
   for (const [key, player] of state.searchPreviewPlayers.entries()) {
     if (!itemMap.has(key)) {
@@ -3276,21 +3338,7 @@ async function mountSearchInlinePreviews(items, mountToken = currentInlinePrevie
   }
 
   bindInlinePreviewAudioFocus(elements.searchResults);
-  elements.searchResults.querySelectorAll('[data-inline-preview-favorite]').forEach((button) => {
-    if (button.dataset.inlinePreviewFavoriteBound === 'true') {
-      return;
-    }
-    button.dataset.inlinePreviewFavoriteBound = 'true';
-    button.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const key = button.dataset.inlinePreviewFavorite;
-      const item = itemMap.get(key);
-      if (item) {
-        toggleFavorite(item);
-      }
-    });
-  });
+  bindInlinePreviewFavoriteControls(elements.searchResults, itemMap);
 }
 
 function closeSearchInlinePreviews() {
@@ -3381,7 +3429,9 @@ function renderFavorites() {
             selectionMode: state.favoriteSelectionMode
           })
         : '',
-    footerSignature: allowInlinePlayback ? activePreviewItems.map(getItemKey).join(',') : '',
+    footerSignature: allowInlinePlayback
+      ? activePreviewItems.map((item) => `${getItemKey(item)}:${isFavorite(item) ? '1' : '0'}`).join(',')
+      : '',
     headerAsideHtml,
     headerAsideSignature: JSON.stringify({
       activePreviewCount: activePreviewItems.length,
@@ -3745,7 +3795,15 @@ async function refreshState(options = {}) {
   if (options.initial && !state.snapshot?.config?.affiliate?.hasAffiliateApiCredentials) {
     state.search.provider = 'dmm';
   }
-  syncFavoritesWithRanking();
+  if (options.initial && !state.serverFavoritesLoaded) {
+    state.favorites = mergeFavorites(state.snapshot?.favorites, state.favorites);
+    state.serverFavoritesLoaded = true;
+    saveFavorites();
+    persistFavoritesToServer();
+  }
+  if (syncFavoritesWithRanking()) {
+    persistFavoritesToServer();
+  }
   pruneDownloadSelection();
   renderWarnings();
   renderSummary();
