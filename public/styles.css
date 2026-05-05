@@ -1138,14 +1138,10 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
-.search-page-size-select {
-  min-height: 36px;
-  padding: 0 30px 0 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--pill-radius);
-  background: #ffffff;
-  color: var(--text);
-  cursor: pointer;
+.search-page-size-summary strong {
+  color: var(--brand-accent);
+  font-size: 0.86rem;
+  line-height: 1;
 }
 
 .search-page-status {
@@ -1209,6 +1205,15 @@ tbody tr:hover {
   display: grid;
   grid-template-columns: 1fr;
   gap: 18px;
+}
+
+#dashboard-ranking .ranking-grid-download-candidates,
+#search-results .ranking-grid-search-results {
+  grid-auto-flow: row !important;
+  grid-auto-columns: initial !important;
+  grid-template-columns: repeat(var(--ranking-grid-columns, 5), minmax(0, 1fr)) !important;
+  height: auto !important;
+  overflow: visible !important;
 }
 
 .ranking-card {
@@ -1632,6 +1637,124 @@ tbody tr:hover {
   font-size: 1rem;
 }
 
+.inline-layout-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.inline-layout-picker[open] {
+  z-index: 30;
+}
+
+.inline-layout-picker-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 66px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgba(0, 117, 74, 0.22);
+  border-radius: var(--pill-radius);
+  background: #ffffff;
+  color: var(--brand-accent);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1;
+  list-style: none;
+  user-select: none;
+}
+
+.header-actions .inline-layout-picker-button {
+  min-height: 42px;
+}
+
+.inline-layout-picker-button::-webkit-details-marker {
+  display: none;
+}
+
+.inline-layout-picker-button:hover,
+.inline-layout-picker[open] .inline-layout-picker-button {
+  border-color: rgba(0, 117, 74, 0.42);
+  background: rgba(0, 117, 74, 0.08);
+}
+
+.inline-layout-picker-icon {
+  display: grid;
+  grid-template-columns: repeat(2, 5px);
+  gap: 2px;
+}
+
+.inline-layout-picker-icon span {
+  width: 5px;
+  height: 5px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.84;
+}
+
+.inline-layout-picker-label {
+  min-width: 28px;
+  text-align: center;
+}
+
+.inline-layout-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 28px));
+  overflow-x: auto;
+  padding: 12px;
+  border: 1px solid rgba(15, 17, 16, 0.12);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 44px rgba(15, 17, 16, 0.18);
+}
+
+.inline-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--inline-layout-picker-columns, 5), 24px);
+  gap: 5px;
+}
+
+.inline-layout-cell {
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(0, 117, 74, 0.24);
+  border-radius: 5px;
+  background: #f8f5ef;
+  cursor: pointer;
+}
+
+.inline-layout-cell.included {
+  background: rgba(0, 117, 74, 0.16);
+}
+
+.inline-layout-cell.preview {
+  border-color: rgba(0, 117, 74, 0.58);
+  background: rgba(0, 117, 74, 0.28);
+}
+
+.inline-layout-cell.exact {
+  box-shadow: inset 0 0 0 2px var(--brand-accent);
+}
+
+.inline-layout-cell:focus-visible {
+  outline: 2px solid var(--brand-accent);
+  outline-offset: 2px;
+}
+
+.inline-layout-status {
+  margin: 9px 0 0;
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-align: center;
+}
+
 .favorite-preview-header h3 {
   margin: 0;
   font-size: 1.1rem;
@@ -1653,7 +1776,8 @@ tbody tr:hover {
 }
 
 .favorite-preview-grid-multi {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--inline-preview-columns, 2), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--inline-preview-rows, 2), auto);
 }
 
 .favorite-preview-card {
@@ -1804,8 +1928,13 @@ tbody tr:hover {
     width: 100%;
   }
 
+  .inline-layout-menu {
+    left: 0;
+    right: auto;
+  }
+
   .favorite-preview-grid-multi {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(var(--inline-preview-columns, 2), minmax(0, 1fr));
   }
 }
 
@@ -2711,7 +2840,7 @@ tbody tr:hover {
   body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-grid-multi,
   body.ipad-inline-layout #favorites-content.inline-preview-active .favorite-preview-grid-multi,
   body.ipad-inline-layout #search-results.inline-preview-active .favorite-preview-grid-multi {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--inline-preview-columns, 2), minmax(0, 1fr));
   }
 
   body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-title,
@@ -2739,7 +2868,7 @@ tbody tr:hover {
   body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-grid-multi,
   body.ipad-inline-layout #favorites-content.inline-preview-active .favorite-preview-grid-multi,
   body.ipad-inline-layout #search-results.inline-preview-active .favorite-preview-grid-multi {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(var(--inline-preview-columns, 2), minmax(0, 1fr));
   }
 }
 
@@ -2800,10 +2929,25 @@ tbody tr:hover {
   }
 
   body.iphone-inline-layout .inline-selection-toggle,
+  body.iphone-inline-layout .inline-layout-picker-button,
   body.iphone-inline-layout .favorite-preview-close-button {
     min-height: 32px;
     padding: 0 10px;
     font-size: 0.76rem;
+  }
+
+  body.iphone-inline-layout .inline-layout-menu {
+    padding: 10px;
+  }
+
+  body.iphone-inline-layout .inline-layout-grid {
+    grid-template-columns: repeat(var(--inline-layout-picker-columns, 5), 22px);
+    gap: 4px;
+  }
+
+  body.iphone-inline-layout .inline-layout-cell {
+    width: 22px;
+    height: 22px;
   }
 
   body.iphone-inline-layout .inline-selection-play-button {
@@ -2815,7 +2959,7 @@ tbody tr:hover {
   body.iphone-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-grid-multi,
   body.iphone-inline-layout #favorites-content.inline-preview-active .favorite-preview-grid-multi,
   body.iphone-inline-layout #search-results.inline-preview-active .favorite-preview-grid-multi {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--inline-preview-columns, 2), minmax(0, 1fr));
     gap: 8px;
   }
 

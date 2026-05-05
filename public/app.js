@@ -14,6 +14,13 @@ const state = {
   favorites: {},
   headerActionsMode: '',
   history: [],
+  inlinePreviewLayouts: {
+    dashboard: { rows: 2, columns: 2 },
+    favorites: { rows: 2, columns: 2 },
+    search: { rows: 2, columns: 2 },
+    'download-candidates': { rows: 4, columns: 5 },
+    'search-results': { rows: 4, columns: 5 }
+  },
   cachedRankingItems: [],
   library: {
     directory: '',
@@ -75,8 +82,21 @@ const state = {
 
 const elements = {};
 const FAVORITES_STORAGE_KEY = 'dmm-download-favorites-v1';
-const DEFAULT_SEARCH_DISPLAY_PAGE_SIZE = 100;
-const SEARCH_DISPLAY_PAGE_SIZE_OPTIONS = [50, 100, 200, 300, 400, 500];
+const INLINE_PREVIEW_LAYOUT_STORAGE_KEY = 'dmm-inline-preview-layouts-v1';
+const INLINE_PREVIEW_LAYOUT_ACTIONS = ['dashboard', 'favorites', 'search', 'download-candidates', 'search-results'];
+const INLINE_PREVIEW_LAYOUT_MAX_COLUMNS = 5;
+const INLINE_PREVIEW_LAYOUT_MAX_ROWS = 4;
+const CONTENT_GRID_LAYOUT_MAX_COLUMNS = 15;
+const CONTENT_GRID_LAYOUT_MAX_ROWS = 8;
+const INLINE_PREVIEW_DEFAULT_LAYOUT = { rows: 2, columns: 2 };
+const INLINE_PREVIEW_LAYOUT_DEFAULTS = {
+  'download-candidates': { rows: 4, columns: 5 },
+  'search-results': { rows: 4, columns: 5 }
+};
+const INLINE_PREVIEW_LAYOUT_LIMITS = {
+  'download-candidates': { rows: CONTENT_GRID_LAYOUT_MAX_ROWS, columns: CONTENT_GRID_LAYOUT_MAX_COLUMNS },
+  'search-results': { rows: CONTENT_GRID_LAYOUT_MAX_ROWS, columns: CONTENT_GRID_LAYOUT_MAX_COLUMNS }
+};
 const previewInfoCache = new Map();
 const INLINE_PREVIEW_TOKEN_KEYS = {
   dashboard: 'dashboardPreviewToken',
@@ -252,13 +272,9 @@ function visibleSearchItems() {
   return items;
 }
 
-function normalizeSearchDisplayPageSize(value) {
-  const pageSize = Number(value);
-  return SEARCH_DISPLAY_PAGE_SIZE_OPTIONS.includes(pageSize) ? pageSize : DEFAULT_SEARCH_DISPLAY_PAGE_SIZE;
-}
-
 function searchDisplayPageSize() {
-  return normalizeSearchDisplayPageSize(state.search?.displayPageSize);
+  const layout = inlinePreviewLayoutFor('search-results');
+  return Math.max(1, layout.rows * layout.columns);
 }
 
 function getSearchPageCount(itemsOrCount = visibleSearchItems()) {
@@ -330,16 +346,6 @@ function setSearchPage(page) {
   refreshSearchPagingResults();
 }
 
-function setSearchDisplayPageSize(value) {
-  const nextPageSize = normalizeSearchDisplayPageSize(value);
-  if (searchDisplayPageSize() === nextPageSize) {
-    return;
-  }
-  state.search.displayPageSize = nextPageSize;
-  state.search.page = 1;
-  refreshSearchPagingResults();
-}
-
 function selectedRankingItems() {
   return currentRankingItems().filter((item) => state.selectedDownloadKeys.has(getDownloadKey(item)));
 }
@@ -354,6 +360,63 @@ function getSelectionKey(item, selectionKind) {
   }
 
   return '';
+}
+
+function inlinePreviewLayoutDefaultFor(action) {
+  return INLINE_PREVIEW_LAYOUT_DEFAULTS[action] || INLINE_PREVIEW_DEFAULT_LAYOUT;
+}
+
+function inlinePreviewLayoutLimitsFor(action) {
+  return INLINE_PREVIEW_LAYOUT_LIMITS[action] || {
+    rows: INLINE_PREVIEW_LAYOUT_MAX_ROWS,
+    columns: INLINE_PREVIEW_LAYOUT_MAX_COLUMNS
+  };
+}
+
+function normalizeInlinePreviewLayout(value, action = '') {
+  const defaults = inlinePreviewLayoutDefaultFor(action);
+  const limits = inlinePreviewLayoutLimitsFor(action);
+  const rows = Math.max(
+    1,
+    Math.min(limits.rows, Number.parseInt(value?.rows, 10) || defaults.rows)
+  );
+  const columns = Math.max(
+    1,
+    Math.min(limits.columns, Number.parseInt(value?.columns, 10) || defaults.columns)
+  );
+  return { rows, columns };
+}
+
+function defaultInlinePreviewLayouts() {
+  return Object.fromEntries(
+    INLINE_PREVIEW_LAYOUT_ACTIONS.map((action) => [action, { ...inlinePreviewLayoutDefaultFor(action) }])
+  );
+}
+
+function loadInlinePreviewLayouts() {
+  const layouts = defaultInlinePreviewLayouts();
+  try {
+    const stored = JSON.parse(localStorage.getItem(INLINE_PREVIEW_LAYOUT_STORAGE_KEY) || '{}');
+    INLINE_PREVIEW_LAYOUT_ACTIONS.forEach((action) => {
+      layouts[action] = normalizeInlinePreviewLayout(stored?.[action], action);
+    });
+  } catch {
+    return layouts;
+  }
+  return layouts;
+}
+
+function saveInlinePreviewLayouts() {
+  localStorage.setItem(INLINE_PREVIEW_LAYOUT_STORAGE_KEY, JSON.stringify(state.inlinePreviewLayouts));
+}
+
+function inlinePreviewLayoutFor(action) {
+  return normalizeInlinePreviewLayout(state.inlinePreviewLayouts?.[action], action);
+}
+
+function inlinePreviewLayoutLabel(action) {
+  const layout = inlinePreviewLayoutFor(action);
+  return `${layout.columns}x${layout.rows}`;
 }
 
 function favoriteItemsSorted() {
@@ -1127,6 +1190,7 @@ function renderHeaderActions() {
       <input id="download-limit-input" class="number-input header-number-input" type="number" min="1" max="50" value="${settings.downloadLimit}" />
     </label>
     <button id="header-fetch-ranking-button" class="header-command-button" type="button">ランキング取得</button>
+    ${downloadEnabled ? renderInlinePreviewLayoutPicker('download-candidates', { title: 'ダウンロード候補グリッド' }) : ''}
     <button
       id="header-select-download-button"
       class="header-command-button ${state.downloadSelectionMode ? 'active' : ''}"
@@ -1157,6 +1221,7 @@ function renderHeaderActions() {
 
   qs('ranking-fetch-count-input').addEventListener('input', markDirty);
   qs('download-limit-input')?.addEventListener('input', markDirty);
+  bindInlinePreviewLayoutControls(elements.headerActions);
   qs('header-fetch-ranking-button').addEventListener('click', fetchRanking);
   qs('header-select-download-button')?.addEventListener('click', toggleDownloadSelectionMode);
   qs('header-download-button')?.addEventListener('click', () => {
@@ -1932,6 +1997,8 @@ function rankingSectionSignature(options) {
     emptyText: options.emptyText,
     eyebrow: options.eyebrow,
     footerSignature: options.footerSignature || '',
+    gridLayout: options.gridLayoutAction ? inlinePreviewLayoutFor(options.gridLayoutAction) : null,
+    gridLayoutAction: options.gridLayoutAction || '',
     headerAsideSignature: options.headerAsideSignature || options.statusText || '',
     previewMode: options.previewMode || 'default',
     selectionKind,
@@ -2045,6 +2112,73 @@ function restoreInlinePreviewCards(container, preservedCards) {
   });
 }
 
+function applyInlinePreviewGridRows(container) {
+  container?.querySelectorAll('.favorite-preview-grid-multi').forEach((grid) => {
+    grid.style.maxHeight = '';
+    grid.style.overflowY = '';
+
+    const rows = Number.parseInt(getComputedStyle(grid).getPropertyValue('--inline-preview-rows'), 10) || 0;
+    if (rows <= 0) {
+      return;
+    }
+
+    const cards = [...grid.querySelectorAll('.favorite-preview-card')];
+    const rowTops = [...new Set(cards.map((card) => Math.round(card.offsetTop)))].sort((left, right) => left - right);
+    if (rowTops.length <= rows) {
+      return;
+    }
+
+    const gap = Number.parseFloat(getComputedStyle(grid).rowGap) || 0;
+    const maxHeight = Math.max(0, rowTops[rows] - rowTops[0] - gap);
+    if (maxHeight > 0) {
+      grid.style.maxHeight = `${maxHeight}px`;
+      grid.style.overflowY = 'auto';
+    }
+  });
+}
+
+function scheduleInlinePreviewGridRows(container) {
+  applyInlinePreviewGridRows(container);
+  window.requestAnimationFrame(() => {
+    applyInlinePreviewGridRows(container);
+  });
+}
+
+function applyRankingGridRows(container) {
+  container?.querySelectorAll('.ranking-grid[data-ranking-grid-rows]').forEach((grid) => {
+    grid.style.removeProperty('max-height');
+    grid.style.removeProperty('overflow-y');
+
+    const rows =
+      Number.parseInt(grid.dataset.rankingGridRows, 10) ||
+      Number.parseInt(getComputedStyle(grid).getPropertyValue('--ranking-grid-rows'), 10) ||
+      0;
+    if (rows <= 0) {
+      return;
+    }
+
+    const cards = [...grid.querySelectorAll('.ranking-card')];
+    const rowTops = [...new Set(cards.map((card) => Math.round(card.offsetTop)))].sort((left, right) => left - right);
+    if (rowTops.length <= rows) {
+      return;
+    }
+
+    const gap = Number.parseFloat(getComputedStyle(grid).rowGap) || 0;
+    const maxHeight = Math.max(0, rowTops[rows] - rowTops[0] - gap);
+    if (maxHeight > 0) {
+      grid.style.setProperty('max-height', `${maxHeight}px`);
+      grid.style.setProperty('overflow-y', 'auto', 'important');
+    }
+  });
+}
+
+function scheduleRankingGridRows(container) {
+  applyRankingGridRows(container);
+  window.requestAnimationFrame(() => {
+    applyRankingGridRows(container);
+  });
+}
+
 function renderRankingSection(container, options) {
   if (!container) {
     return;
@@ -2075,6 +2209,15 @@ function renderRankingSection(container, options) {
   const selectionKind = options.selectionKind || '';
   const selectionMode = Boolean(options.selectionMode);
   const selectedKeys = options.selectedKeys || new Set();
+  const gridClasses = ['ranking-grid', options.gridClassName].filter(Boolean).join(' ');
+  const gridLayoutAction = options.gridLayoutAction || '';
+  const gridLayout = INLINE_PREVIEW_LAYOUT_ACTIONS.includes(gridLayoutAction)
+    ? inlinePreviewLayoutFor(gridLayoutAction)
+    : null;
+  const gridStyle = gridLayout
+    ? ` style="--ranking-grid-columns: ${gridLayout.columns}; --ranking-grid-rows: ${gridLayout.rows};"`
+    : '';
+  const gridRowsAttr = gridLayout ? ` data-ranking-grid-rows="${gridLayout.rows}"` : '';
 
   container.innerHTML = `
     ${options.beforeHtml || ''}
@@ -2089,7 +2232,7 @@ function renderRankingSection(container, options) {
 
     ${
       items.length
-        ? `<div class="ranking-grid">
+        ? `<div class="${escapeHtml(gridClasses)}"${gridStyle}${gridRowsAttr}>
             ${items
               .map((item) => {
                 const key = getItemKey(item);
@@ -2197,6 +2340,8 @@ function renderRankingSection(container, options) {
   restoreInlinePreviewCards(container, preservedInlinePreviewCards);
   bindRankingCardActions(container, items, options);
   options.onAfterRender?.();
+  scheduleRankingGridRows(container);
+  scheduleInlinePreviewGridRows(container);
 }
 
 function bindRankingCardActions(container, items, options = {}) {
@@ -2328,6 +2473,7 @@ function renderDashboardRanking() {
   const headerAsideHtml = showBrowserControls
     ? `
         <div class="ranking-header-actions">
+          ${renderInlinePreviewLayoutPicker('download-candidates', { title: 'ダウンロード候補グリッド' })}
           <button
             type="button"
             class="header-command-button ${state.downloadSelectionMode ? 'active' : ''}"
@@ -2367,20 +2513,25 @@ function renderDashboardRanking() {
           })
         : '',
     footerSignature: allowInlinePlayback
-      ? activePreviewItems.map((item) => `${getItemKey(item)}:${isFavorite(item) ? '1' : '0'}`).join(',')
+      ? `${inlinePreviewLayoutLabel('dashboard')}:${activePreviewItems.map((item) => `${getItemKey(item)}:${isFavorite(item) ? '1' : '0'}`).join(',')}`
       : '',
     headerAsideHtml,
     headerAsideSignature: JSON.stringify({
       activePreviewCount: activePreviewItems.length,
       allowInlinePlayback,
+      downloadCandidatesLayout: inlinePreviewLayoutFor('download-candidates'),
+      inlinePreviewLayout: inlinePreviewLayoutFor('dashboard'),
       selectedCount,
       selectionMode: state.downloadSelectionMode,
       statusText
     }),
     inlinePreviewAction: 'dashboard',
     inlinePreviewActive: allowInlinePlayback && activePreviewItems.length > 0,
+    gridClassName: 'ranking-grid-download-candidates',
+    gridLayoutAction: 'download-candidates',
     items: displayItems,
     onAfterRender: () => {
+      bindInlinePreviewLayoutControls(elements.dashboardRanking);
       elements.dashboardRanking?.querySelectorAll('[data-dashboard-selection-toggle]').forEach((button) => {
         button.addEventListener('click', () => {
           toggleDownloadSelectionMode();
@@ -2503,14 +2654,12 @@ function renderSearchPagingControls(filteredCount, position = 'top') {
     return '';
   }
 
+  const layout = inlinePreviewLayoutFor('search-results');
   const pageSize = searchDisplayPageSize();
   const pageCount = getSearchPageCount(filteredCount);
   const currentPage = clampSearchPage(filteredCount);
   const startCount = (currentPage - 1) * pageSize + 1;
   const endCount = Math.min(filteredCount, currentPage * pageSize);
-  const sizeOptions = SEARCH_DISPLAY_PAGE_SIZE_OPTIONS.map((option) => {
-    return `<option value="${option}" ${option === pageSize ? 'selected' : ''}>${option}</option>`;
-  }).join('');
   const paginationHtml =
     pageCount > 1
       ? `
@@ -2556,12 +2705,10 @@ function renderSearchPagingControls(filteredCount, position = 'top') {
 
   return `
     <div class="search-pagination-bar search-pagination-bar-${escapeHtml(position)}">
-      <label class="search-page-size-control">
+      <div class="search-page-size-control search-page-size-summary">
         <span>表示件数</span>
-        <select class="search-page-size-select" data-search-display-page-size>
-          ${sizeOptions}
-        </select>
-      </label>
+        <strong>${layout.columns}x${layout.rows}</strong>
+      </div>
       <p class="search-page-status">${startCount}-${endCount} / ${filteredCount}件</p>
       ${paginationHtml}
     </div>
@@ -2569,9 +2716,6 @@ function renderSearchPagingControls(filteredCount, position = 'top') {
 }
 
 function bindSearchPagingControls(root = document) {
-  root.querySelectorAll('[data-search-display-page-size]').forEach((select) => {
-    select.addEventListener('change', () => setSearchDisplayPageSize(select.value));
-  });
   root.querySelectorAll('[data-search-page]').forEach((button) => {
     button.addEventListener('click', () => setSearchPage(button.dataset.searchPage));
   });
@@ -2655,7 +2799,9 @@ function renderSearchResults() {
   const headerAsideHtml = showBrowserControls
     ? `
         <div class="ranking-header-actions">
+          ${renderInlinePreviewLayoutPicker('search-results', { title: '検索結果グリッド' })}
           ${renderSearchFilterControls()}
+          ${renderInlinePreviewLayoutPicker('search')}
           <button
             type="button"
             class="header-command-button ${state.searchSelectionMode ? 'active' : ''}"
@@ -2696,6 +2842,7 @@ function renderSearchResults() {
     afterHeaderHtmlSignature: JSON.stringify({
       currentPage,
       filteredCount: filteredSearchItems.length,
+      searchResultsLayout: inlinePreviewLayoutFor('search-results'),
       pageCount,
       pageSize,
       position: 'top'
@@ -2704,6 +2851,7 @@ function renderSearchResults() {
     afterItemsHtmlSignature: JSON.stringify({
       currentPage,
       filteredCount: filteredSearchItems.length,
+      searchResultsLayout: inlinePreviewLayoutFor('search-results'),
       pageCount,
       pageSize,
       position: 'bottom'
@@ -2733,7 +2881,7 @@ function renderSearchResults() {
           })
         : '',
     footerSignature: allowInlinePlayback
-      ? activePreviewItems.map((item) => `${getItemKey(item)}:${isFavorite(item) ? '1' : '0'}`).join(',')
+      ? `${inlinePreviewLayoutLabel('search')}:${activePreviewItems.map((item) => `${getItemKey(item)}:${isFavorite(item) ? '1' : '0'}`).join(',')}`
       : '',
     headerAsideHtml,
     headerAsideSignature: JSON.stringify({
@@ -2754,6 +2902,8 @@ function renderSearchResults() {
       filters: state.searchFilters,
       currentPage,
       filteredSearchItems: filteredSearchItems.length,
+      inlinePreviewLayout: inlinePreviewLayoutFor('search'),
+      searchResultsLayout: inlinePreviewLayoutFor('search-results'),
       pageCount,
       pageSize,
       totalSearchItems: totalSearchItems.length,
@@ -2763,11 +2913,14 @@ function renderSearchResults() {
     inlinePreviewActive: allowInlinePlayback && activePreviewItems.length > 0,
     isPreviewable: isSearchPreviewable,
     isSelectable: isSearchPreviewable,
+    gridClassName: 'ranking-grid-search-results',
+    gridLayoutAction: 'search-results',
     items: searchItems,
     onAfterRender: () => {
       bindActressSearchForms(elements.searchResults);
       bindSearchFilterControls(elements.searchResults);
       bindSearchPagingControls(elements.searchResults);
+      bindInlinePreviewLayoutControls(elements.searchResults);
       restoreActressSearchFocus(focusSnapshot);
       restoreSearchViewport(viewportSnapshot);
       elements.searchResults?.querySelectorAll('[data-search-selection-toggle]').forEach((button) => {
@@ -2803,6 +2956,187 @@ function renderSearchResults() {
   });
 }
 
+function renderInlinePreviewLayoutPicker(selectionAction = '', options = {}) {
+  if (!INLINE_PREVIEW_LAYOUT_ACTIONS.includes(selectionAction)) {
+    return '';
+  }
+
+  const layout = inlinePreviewLayoutFor(selectionAction);
+  const limits = inlinePreviewLayoutLimitsFor(selectionAction);
+  const title = options.title || '再生グリッド';
+  const cells = Array.from({ length: limits.rows }, (_rowValue, rowIndex) => {
+    const row = rowIndex + 1;
+    return Array.from({ length: limits.columns }, (_columnValue, columnIndex) => {
+      const column = columnIndex + 1;
+      const included = row <= layout.rows && column <= layout.columns;
+      const exact = row === layout.rows && column === layout.columns;
+      return `
+        <button
+          type="button"
+          class="inline-layout-cell ${included ? 'included' : ''} ${exact ? 'exact' : ''}"
+          data-inline-layout-cell
+          data-inline-layout-row="${row}"
+          data-inline-layout-column="${column}"
+          role="menuitemradio"
+          aria-checked="${exact ? 'true' : 'false'}"
+          aria-label="${column}列 x ${row}行"
+          title="${column}x${row}"
+        ></button>
+      `;
+    }).join('');
+  }).join('');
+
+  return `
+    <details class="inline-layout-picker" data-inline-layout-picker="${escapeHtml(selectionAction)}">
+      <summary
+        class="inline-layout-picker-button"
+        aria-label="${escapeHtml(title)}"
+        title="${escapeHtml(title)}"
+      >
+        <span class="inline-layout-picker-icon" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+        </span>
+        <span class="inline-layout-picker-label">${escapeHtml(inlinePreviewLayoutLabel(selectionAction))}</span>
+      </summary>
+      <div class="inline-layout-menu" role="menu" aria-label="${escapeHtml(title)}">
+        <div class="inline-layout-grid" style="--inline-layout-picker-columns: ${limits.columns};">
+          ${cells}
+        </div>
+        <p class="inline-layout-status" data-inline-layout-status>${layout.columns}列 x ${layout.rows}行</p>
+      </div>
+    </details>
+  `;
+}
+
+function updateInlinePreviewLayoutPickerPreview(picker, rows, columns) {
+  if (!picker) {
+    return;
+  }
+
+  picker.querySelectorAll('[data-inline-layout-cell]').forEach((cell) => {
+    const cellRow = Number(cell.dataset.inlineLayoutRow);
+    const cellColumn = Number(cell.dataset.inlineLayoutColumn);
+    cell.classList.toggle('preview', cellRow <= rows && cellColumn <= columns);
+  });
+
+  const status = picker.querySelector('[data-inline-layout-status]');
+  if (status) {
+    status.textContent = `${columns}列 x ${rows}行`;
+  }
+}
+
+function resetInlinePreviewLayoutPickerPreview(picker) {
+  const action = picker?.dataset.inlineLayoutPicker;
+  if (!INLINE_PREVIEW_LAYOUT_ACTIONS.includes(action)) {
+    return;
+  }
+  const layout = inlinePreviewLayoutFor(action);
+  updateInlinePreviewLayoutPickerPreview(picker, layout.rows, layout.columns);
+}
+
+function syncInlinePreviewLayoutControls(action, root = document) {
+  if (!INLINE_PREVIEW_LAYOUT_ACTIONS.includes(action)) {
+    return;
+  }
+
+  const layout = inlinePreviewLayoutFor(action);
+  root.querySelectorAll(`[data-inline-layout-picker="${CSS.escape(action)}"]`).forEach((picker) => {
+    const label = picker.querySelector('.inline-layout-picker-label');
+    if (label) {
+      label.textContent = inlinePreviewLayoutLabel(action);
+    }
+
+    picker.querySelectorAll('[data-inline-layout-cell]').forEach((cell) => {
+      const row = Number(cell.dataset.inlineLayoutRow);
+      const column = Number(cell.dataset.inlineLayoutColumn);
+      const included = row <= layout.rows && column <= layout.columns;
+      const exact = row === layout.rows && column === layout.columns;
+      cell.classList.toggle('included', included);
+      cell.classList.toggle('exact', exact);
+      cell.setAttribute('aria-checked', exact ? 'true' : 'false');
+    });
+
+    resetInlinePreviewLayoutPickerPreview(picker);
+  });
+}
+
+function renderInlinePreviewAction(action) {
+  if (action === 'dashboard') {
+    state.renderCache.dashboardRanking = '';
+    renderDashboardRanking();
+  }
+  if (action === 'download-candidates') {
+    state.renderCache.dashboardRanking = '';
+    renderDashboardRanking();
+  }
+  if (action === 'favorites') {
+    state.renderCache.favorites = '';
+    renderFavorites();
+  }
+  if (action === 'search') {
+    state.renderCache.searchResults = '';
+    renderSearchResults();
+  }
+  if (action === 'search-results') {
+    state.renderCache.searchResults = '';
+    renderSearchResults();
+  }
+}
+
+function setInlinePreviewLayout(action, rows, columns) {
+  if (!INLINE_PREVIEW_LAYOUT_ACTIONS.includes(action)) {
+    return;
+  }
+
+  const nextLayout = normalizeInlinePreviewLayout({ rows, columns }, action);
+  const currentLayout = inlinePreviewLayoutFor(action);
+  if (nextLayout.rows === currentLayout.rows && nextLayout.columns === currentLayout.columns) {
+    return;
+  }
+
+  state.inlinePreviewLayouts = {
+    ...state.inlinePreviewLayouts,
+    [action]: nextLayout
+  };
+  saveInlinePreviewLayouts();
+  if (action === 'search-results') {
+    state.search.page = 1;
+  }
+  syncInlinePreviewLayoutControls(action);
+  renderInlinePreviewAction(action);
+}
+
+function bindInlinePreviewLayoutControls(root = document) {
+  root.querySelectorAll('[data-inline-layout-picker]').forEach((picker) => {
+    if (picker.dataset.inlineLayoutBound === 'true') {
+      return;
+    }
+    picker.dataset.inlineLayoutBound = 'true';
+    resetInlinePreviewLayoutPickerPreview(picker);
+
+    picker.querySelector('.inline-layout-grid')?.addEventListener('mouseleave', () => {
+      resetInlinePreviewLayoutPickerPreview(picker);
+    });
+
+    picker.querySelectorAll('[data-inline-layout-cell]').forEach((cell) => {
+      const rows = Number(cell.dataset.inlineLayoutRow);
+      const columns = Number(cell.dataset.inlineLayoutColumn);
+      cell.addEventListener('pointerenter', () => {
+        updateInlinePreviewLayoutPickerPreview(picker, rows, columns);
+      });
+      cell.addEventListener('focus', () => {
+        updateInlinePreviewLayoutPickerPreview(picker, rows, columns);
+      });
+      cell.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setInlinePreviewLayout(picker.dataset.inlineLayoutPicker, rows, columns);
+        picker.open = false;
+      });
+    });
+  });
+}
+
 function renderInlinePreviewSelectionControls(options = {}) {
   const { selectionAction = '', selectionMode = false, selectedCount = 0 } = options;
   const actionAttributes = {
@@ -2825,6 +3159,7 @@ function renderInlinePreviewSelectionControls(options = {}) {
   }
 
   return `
+    ${renderInlinePreviewLayoutPicker(selectionAction)}
     <button
       type="button"
       class="header-command-button inline-selection-toggle ${selectionMode ? 'active' : ''}"
@@ -2856,6 +3191,8 @@ function renderInlinePreviewSection(items, options = {}) {
     selectionMode = false,
     showFavoriteToggle = false
   } = options;
+  const layoutAction = INLINE_PREVIEW_LAYOUT_ACTIONS.includes(selectionAction) ? selectionAction : closeAction;
+  const layout = inlinePreviewLayoutFor(layoutAction);
   const selectionControlsHtml = renderInlinePreviewSelectionControls({
     selectedCount,
     selectionAction,
@@ -2875,7 +3212,10 @@ function renderInlinePreviewSection(items, options = {}) {
           </button>
         </div>
       </div>
-      <div class="favorite-preview-grid ${multiple ? 'favorite-preview-grid-multi' : 'favorite-preview-grid-single'}">
+      <div
+        class="favorite-preview-grid ${multiple ? 'favorite-preview-grid-multi' : 'favorite-preview-grid-single'}"
+        style="--inline-preview-columns: ${multiple ? layout.columns : 1}; --inline-preview-rows: ${layout.rows};"
+      >
         ${items
           .map((item) => {
             const key = getItemKey(item);
@@ -2965,6 +3305,7 @@ function removeInlinePreviewCardElement(container, key, playerStore) {
     grid.classList.toggle('favorite-preview-grid-single', remainingCards.length <= 1);
     grid.classList.toggle('favorite-preview-grid-multi', remainingCards.length > 1);
   }
+  scheduleInlinePreviewGridRows(container);
   scheduleInlinePreviewAudioFocusSync(2);
   return true;
 }
@@ -3392,6 +3733,7 @@ function renderFavorites() {
   const headerAsideHtml = showBrowserControls
     ? `
         <div class="ranking-header-actions">
+          ${renderInlinePreviewLayoutPicker('favorites')}
           <button
             type="button"
             class="header-command-button ${state.favoriteSelectionMode ? 'active' : ''}"
@@ -3430,12 +3772,13 @@ function renderFavorites() {
           })
         : '',
     footerSignature: allowInlinePlayback
-      ? activePreviewItems.map((item) => `${getItemKey(item)}:${isFavorite(item) ? '1' : '0'}`).join(',')
+      ? `${inlinePreviewLayoutLabel('favorites')}:${activePreviewItems.map((item) => `${getItemKey(item)}:${isFavorite(item) ? '1' : '0'}`).join(',')}`
       : '',
     headerAsideHtml,
     headerAsideSignature: JSON.stringify({
       activePreviewCount: activePreviewItems.length,
       allowInlinePlayback,
+      inlinePreviewLayout: inlinePreviewLayoutFor('favorites'),
       selectionCount,
       selectionMode: state.favoriteSelectionMode,
       showBrowserControls,
@@ -3445,6 +3788,7 @@ function renderFavorites() {
     inlinePreviewActive: allowInlinePlayback && activePreviewItems.length > 0,
     items: favoriteItems,
     onAfterRender: () => {
+      bindInlinePreviewLayoutControls(elements.favoritesContent);
       elements.favoritesContent?.querySelectorAll('[data-favorite-selection-toggle]').forEach((button) => {
         button.addEventListener('click', () => {
           toggleFavoriteSelectionMode();
@@ -4364,6 +4708,14 @@ function bindStaticEvents() {
       setSettingsPanelOpen(false);
     }
   });
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('[data-inline-layout-picker]')) {
+      return;
+    }
+    document.querySelectorAll('[data-inline-layout-picker][open]').forEach((picker) => {
+      picker.open = false;
+    });
+  });
 
   elements.viewerRefreshButton.addEventListener('click', () => {
     state.viewerMode = 'server';
@@ -4504,6 +4856,7 @@ async function boot() {
   elements.warningList = qs('warning-list');
 
   state.favorites = loadFavorites();
+  state.inlinePreviewLayouts = loadInlinePreviewLayouts();
   syncResponsiveState();
   bindStaticEvents();
   switchTab('dashboard');
