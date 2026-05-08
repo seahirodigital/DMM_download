@@ -39,6 +39,7 @@ const state = {
     favorites: '',
     searchResults: ''
   },
+  rankingSourceMode: '',
   serverFavoritesLoaded: false,
   search: {
     backgroundError: '',
@@ -108,6 +109,21 @@ let searchRequestToken = 0;
 const TOUCH_DEVICE_MEDIA_QUERY = '(hover: none) and (pointer: coarse)';
 const PHONE_LAYOUT_MEDIA_QUERY = `${TOUCH_DEVICE_MEDIA_QUERY} and (max-width: 767px), ${TOUCH_DEVICE_MEDIA_QUERY} and (max-height: 599px)`;
 const TABLET_LAYOUT_MEDIA_QUERY = `${TOUCH_DEVICE_MEDIA_QUERY} and (min-width: 768px) and (min-height: 600px) and (max-width: 1400px)`;
+const RANKING_SOURCE_MODES = {
+  bestseller: {
+    label: '売れ筋',
+    url: 'https://tv.dmm.com/vod/restrict/list/?viewing_types=PPV&sort=RANK'
+  },
+  genre: {
+    label: 'ジャンル',
+    url: 'https://tv.dmm.com/vod/restrict/list/?genres=66313'
+  },
+  latest: {
+    label: '新着',
+    url: 'https://tv.dmm.com/vod/restrict/list/?sort=NEW'
+  }
+};
+const RANKING_SOURCE_MODE_ORDER = ['bestseller', 'genre', 'latest'];
 
 function qs(id) {
   return document.getElementById(id);
@@ -120,6 +136,86 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function inferRankingSourceMode(sourceUrl) {
+  try {
+    const url = new URL(sourceUrl || RANKING_SOURCE_MODES.genre.url);
+    const sort = String(url.searchParams.get('sort') || '').toUpperCase();
+    const genres = url.searchParams.getAll('genres');
+    const viewingTypes = [
+      ...url.searchParams.getAll('viewing_types'),
+      ...url.searchParams.getAll('viewingTypes')
+    ].map((value) => String(value || '').toUpperCase());
+
+    if (sort === 'NEW') {
+      return 'latest';
+    }
+    if (viewingTypes.includes('PPV') && sort === 'RANK') {
+      return 'bestseller';
+    }
+    if (genres.includes('66313')) {
+      return 'genre';
+    }
+  } catch {
+    return 'genre';
+  }
+  return 'genre';
+}
+
+function currentRankingSourceMode() {
+  return state.rankingSourceMode || inferRankingSourceMode(state.snapshot?.settings?.rankingSourceUrl);
+}
+
+function currentRankingSourceUrl() {
+  const mode = currentRankingSourceMode();
+  return RANKING_SOURCE_MODES[mode]?.url || state.snapshot?.settings?.rankingSourceUrl || RANKING_SOURCE_MODES.genre.url;
+}
+
+function renderRankingSourceToggle() {
+  const activeMode = currentRankingSourceMode();
+  return `
+    <div class="ranking-source-toggle" role="group" aria-label="ランキング取得元">
+      ${RANKING_SOURCE_MODE_ORDER.map((mode) => {
+        const option = RANKING_SOURCE_MODES[mode];
+        const active = mode === activeMode;
+        return `
+          <button
+            type="button"
+            class="header-command-button filter-toggle-button ranking-source-toggle-button ${active ? 'active' : ''}"
+            data-ranking-source-mode="${mode}"
+            aria-pressed="${active ? 'true' : 'false'}"
+          >
+            ${escapeHtml(option.label)}
+          </button>
+        `;
+      }).join('')}
+    </div>
+    <input id="ranking-source-url-header-input" type="hidden" value="${escapeHtml(currentRankingSourceUrl())}" />
+  `;
+}
+
+function syncRankingSourceToggle(root = document) {
+  const activeMode = currentRankingSourceMode();
+  root.querySelectorAll('[data-ranking-source-mode]').forEach((button) => {
+    const active = button.dataset.rankingSourceMode === activeMode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  const sourceInput = qs('ranking-source-url-header-input');
+  if (sourceInput) {
+    sourceInput.value = currentRankingSourceUrl();
+  }
+}
+
+function bindRankingSourceToggle(root = document) {
+  root.querySelectorAll('[data-ranking-source-mode]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.rankingSourceMode = button.dataset.rankingSourceMode || 'genre';
+      state.controlsDirty = true;
+      syncRankingSourceToggle(root);
+    });
+  });
 }
 
 function getItemKey(item) {
@@ -1181,6 +1277,7 @@ function renderHeaderActions() {
   const rankingFetchCount = settings.rankingFetchCount || config.ranking.first || 15;
 
   elements.headerActions.innerHTML = `
+    ${renderRankingSourceToggle()}
     <label class="header-control">
       <span>ランキング取得数</span>
       <input id="ranking-fetch-count-input" class="number-input header-number-input" type="number" min="1" max="100" value="${rankingFetchCount}" />
@@ -1221,6 +1318,7 @@ function renderHeaderActions() {
 
   qs('ranking-fetch-count-input').addEventListener('input', markDirty);
   qs('download-limit-input')?.addEventListener('input', markDirty);
+  bindRankingSourceToggle(elements.headerActions);
   bindInlinePreviewLayoutControls(elements.headerActions);
   qs('header-fetch-ranking-button').addEventListener('click', fetchRanking);
   qs('header-select-download-button')?.addEventListener('click', toggleDownloadSelectionMode);
@@ -4135,6 +4233,9 @@ async function refreshHistory() {
 async function refreshState(options = {}) {
   const stateUrl = options.initial ? '/api/state?initial=1' : '/api/state';
   state.snapshot = await requestJson(stateUrl);
+  if (!state.rankingSourceMode) {
+    state.rankingSourceMode = inferRankingSourceMode(state.snapshot?.settings?.rankingSourceUrl);
+  }
   cacheRankingItems(state.snapshot?.ranking?.items || []);
   if (options.initial && !state.snapshot?.config?.affiliate?.hasAffiliateApiCredentials) {
     state.search.provider = 'dmm';
@@ -4173,6 +4274,9 @@ async function refreshState(options = {}) {
 
 async function saveSettings(options = {}) {
   if (!canManageSettings()) {
+    if (options.silent) {
+      return;
+    }
     showMessage('Hosted mode では設定変更を保存できません。', 'error');
     return;
   }
@@ -4188,7 +4292,10 @@ async function saveSettings(options = {}) {
       rankingFetchCount: Number.isFinite(parsedRankingFetchCount)
         ? parsedRankingFetchCount
         : state.snapshot?.settings?.rankingFetchCount || state.snapshot?.config?.ranking?.first || 15,
-      rankingSourceUrl: qs('ranking-source-url-input')?.value || state.snapshot?.settings?.rankingSourceUrl
+      rankingSourceUrl:
+        qs('ranking-source-url-header-input')?.value ||
+        qs('ranking-source-url-input')?.value ||
+        currentRankingSourceUrl()
     };
 
     await requestJson('/api/settings', {
@@ -4439,7 +4546,10 @@ async function fetchRanking() {
     await requestJson('/api/ranking/fetch', {
       body: JSON.stringify({
         first: configuredFirst,
-        sourcePageUrl: qs('ranking-source-url-input')?.value || state.snapshot?.settings?.rankingSourceUrl
+        sourcePageUrl:
+          qs('ranking-source-url-header-input')?.value ||
+          qs('ranking-source-url-input')?.value ||
+          currentRankingSourceUrl()
       }),
       method: 'POST'
     });

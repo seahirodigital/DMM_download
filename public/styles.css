@@ -1196,6 +1196,49 @@ tbody tr:hover {
   font-size: 0.78rem;
 }
 
+.ranking-source-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--pill-radius);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ranking-source-toggle-button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-inverse-soft);
+  box-shadow: none;
+}
+
+.ranking-source-toggle-button.active {
+  background: #ffffff;
+  color: var(--brand);
+  border-color: transparent;
+  box-shadow: var(--shadow-card);
+}
+
+.mobile-sidebar-actions .ranking-source-toggle {
+  border-color: var(--line);
+  background: #f7f4ee;
+}
+
+.mobile-sidebar-actions .ranking-source-toggle-button {
+  color: var(--text-soft);
+}
+
+.mobile-sidebar-actions .ranking-source-toggle .ranking-source-toggle-button {
+  width: auto !important;
+  min-height: 36px;
+  border-radius: var(--pill-radius) !important;
+}
+
+.mobile-sidebar-actions .ranking-source-toggle-button.active {
+  color: var(--brand);
+}
+
 .favorite-header-play-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
