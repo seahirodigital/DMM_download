@@ -2801,6 +2801,12 @@ tbody tr:hover {
     overflow: visible;
   }
 
+  body.ipad-inline-layout #dashboard-ranking.inline-preview-active > .ranking-grid,
+  body.ipad-inline-layout #favorites-content.inline-preview-active > .ranking-grid,
+  body.ipad-inline-layout #search-results.inline-preview-active > .ranking-grid {
+    display: none !important;
+  }
+
   body.ipad-inline-layout #dashboard-ranking.inline-preview-active .ranking-grid,
   body.ipad-inline-layout #favorites-content.inline-preview-active .ranking-grid,
   body.ipad-inline-layout #search-results.inline-preview-active .ranking-grid {
@@ -2812,7 +2818,9 @@ tbody tr:hover {
   body.ipad-inline-layout #favorites-content.inline-preview-active .favorite-preview-section,
   body.ipad-inline-layout #search-results.inline-preview-active .favorite-preview-section {
     min-height: 0;
-    margin-top: 12px;
+    position: relative;
+    z-index: 5;
+    margin-top: 0;
   }
 
   body.ipad-inline-layout #dashboard-ranking.inline-preview-active .favorite-preview-card,
