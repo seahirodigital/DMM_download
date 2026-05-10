@@ -1251,6 +1251,7 @@ tbody tr:hover {
 }
 
 #dashboard-ranking .ranking-grid-download-candidates,
+#favorites-content .ranking-grid-favorites,
 #search-results .ranking-grid-search-results {
   grid-auto-flow: row !important;
   grid-auto-columns: initial !important;

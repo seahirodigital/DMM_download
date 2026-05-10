@@ -84,7 +84,7 @@ const state = {
 const elements = {};
 const FAVORITES_STORAGE_KEY = 'dmm-download-favorites-v1';
 const INLINE_PREVIEW_LAYOUT_STORAGE_KEY = 'dmm-inline-preview-layouts-v1';
-const INLINE_PREVIEW_LAYOUT_ACTIONS = ['dashboard', 'favorites', 'search', 'download-candidates', 'search-results'];
+const INLINE_PREVIEW_LAYOUT_ACTIONS = ['dashboard', 'favorites', 'search', 'download-candidates', 'favorites-grid', 'search-results'];
 const INLINE_PREVIEW_LAYOUT_MAX_COLUMNS = 5;
 const INLINE_PREVIEW_LAYOUT_MAX_ROWS = 4;
 const CONTENT_GRID_LAYOUT_MAX_COLUMNS = 15;
@@ -92,10 +92,12 @@ const CONTENT_GRID_LAYOUT_MAX_ROWS = 8;
 const INLINE_PREVIEW_DEFAULT_LAYOUT = { rows: 2, columns: 2 };
 const INLINE_PREVIEW_LAYOUT_DEFAULTS = {
   'download-candidates': { rows: 4, columns: 5 },
+  'favorites-grid': { rows: 4, columns: 5 },
   'search-results': { rows: 4, columns: 5 }
 };
 const INLINE_PREVIEW_LAYOUT_LIMITS = {
   'download-candidates': { rows: CONTENT_GRID_LAYOUT_MAX_ROWS, columns: CONTENT_GRID_LAYOUT_MAX_COLUMNS },
+  'favorites-grid': { rows: CONTENT_GRID_LAYOUT_MAX_ROWS, columns: CONTENT_GRID_LAYOUT_MAX_COLUMNS },
   'search-results': { rows: CONTENT_GRID_LAYOUT_MAX_ROWS, columns: CONTENT_GRID_LAYOUT_MAX_COLUMNS }
 };
 const previewInfoCache = new Map();
@@ -299,7 +301,7 @@ function getProductCode(item) {
 }
 
 function isSearchPreviewable(item) {
-  return Boolean(item?.seasonId || item?.playbackUrl);
+  return Boolean(item?.seasonId || item?.playbackUrl || item?.detailUrl);
 }
 
 function isFanzaLimitedItem(item) {
@@ -348,9 +350,6 @@ function areSearchFiltersActive() {
 function visibleSearchItems() {
   const filters = state.searchFilters;
   let items = currentSearchItems().filter((item) => !isExcludedSearchItem(item));
-  if (state.searchSelectionMode) {
-    items = items.filter(isSearchPreviewable);
-  }
   if (filters.castType) {
     items = items.filter((item) => getSearchItemCastType(item) === filters.castType);
   }
@@ -2899,7 +2898,6 @@ function renderSearchResults() {
         <div class="ranking-header-actions">
           ${renderInlinePreviewLayoutPicker('search-results', { title: '検索結果グリッド' })}
           ${renderSearchFilterControls()}
-          ${renderInlinePreviewLayoutPicker('search')}
           <button
             type="button"
             class="header-command-button ${state.searchSelectionMode ? 'active' : ''}"
@@ -3831,7 +3829,7 @@ function renderFavorites() {
   const headerAsideHtml = showBrowserControls
     ? `
         <div class="ranking-header-actions">
-          ${renderInlinePreviewLayoutPicker('favorites')}
+          ${renderInlinePreviewLayoutPicker('favorites-grid')}
           <button
             type="button"
             class="header-command-button ${state.favoriteSelectionMode ? 'active' : ''}"
@@ -3877,6 +3875,7 @@ function renderFavorites() {
       activePreviewCount: activePreviewItems.length,
       allowInlinePlayback,
       inlinePreviewLayout: inlinePreviewLayoutFor('favorites'),
+      favoritesGridLayout: inlinePreviewLayoutFor('favorites-grid'),
       selectionCount,
       selectionMode: state.favoriteSelectionMode,
       showBrowserControls,
@@ -3884,6 +3883,8 @@ function renderFavorites() {
     }),
     inlinePreviewAction: 'favorites',
     inlinePreviewActive: allowInlinePlayback && activePreviewItems.length > 0,
+    gridClassName: 'ranking-grid-favorites',
+    gridLayoutAction: 'favorites-grid',
     items: favoriteItems,
     onAfterRender: () => {
       bindInlinePreviewLayoutControls(elements.favoritesContent);
