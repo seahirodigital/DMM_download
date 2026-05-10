@@ -754,6 +754,7 @@ async function createApp() {
       maxPages: body.maxPages || url.searchParams.get('maxPages'),
       pageSize: body.pageSize || url.searchParams.get('pageSize'),
       provider: body.provider || url.searchParams.get('provider') || url.searchParams.get('site'),
+      searchType: body.searchType || body.type || url.searchParams.get('searchType') || url.searchParams.get('type'),
       stopAfterItems: body.stopAfterItems || url.searchParams.get('stopAfterItems')
     });
 

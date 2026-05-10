@@ -55,6 +55,7 @@ const state = {
     pagesFetched: 0,
     provider: 'fanza',
     query: '',
+    searchType: 'actress',
     sourcePageUrl: '',
     total: 0
   },
@@ -273,8 +274,35 @@ function normalizeSearchProvider(value) {
   return normalized === 'd' || normalized === 'dmm' || normalized === 'dmm.com' ? 'dmm' : 'fanza';
 }
 
+function normalizeSearchType(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['maker', 'manufacturer', 'studio', 'm', 'メーカー'].includes(normalized)) {
+    return 'maker';
+  }
+  if (['keyword', 'title', 'product', 'code', 'work', 'works', 'item', '品番', '作品'].includes(normalized)) {
+    return 'keyword';
+  }
+  return 'actress';
+}
+
 function searchProviderLabel(provider = state.search.provider) {
   return normalizeSearchProvider(provider) === 'dmm' ? 'DMM' : 'FANZA';
+}
+
+function searchTypeLabel(type = state.search.searchType) {
+  return {
+    actress: '女優',
+    keyword: '作品',
+    maker: 'メーカー'
+  }[normalizeSearchType(type)];
+}
+
+function searchTypePlaceholder(type = state.search.searchType) {
+  return {
+    actress: '女優名で検索',
+    keyword: '作品名・品番で検索',
+    maker: 'メーカー名で検索'
+  }[normalizeSearchType(type)];
 }
 
 function formatProductCode(value) {
@@ -1122,10 +1150,11 @@ function renderActressSearchForm(options = {}) {
   const prefix = idPrefix ? `${idPrefix}-` : '';
   const inputValue = state.searchDraft ?? state.search.query;
   const provider = normalizeSearchProvider(state.search.provider);
+  const searchType = normalizeSearchType(state.search.searchType);
   return `
     <form id="${prefix}actress-search-form" class="header-search-form ${escapeHtml(extraClass)}" data-actress-search-form>
       <label class="header-control header-search-control">
-        <span>検索語</span>
+        <span>${escapeHtml(searchTypeLabel(searchType))}</span>
         <input
           id="${prefix}actress-search-input"
           class="text-input header-search-input"
@@ -1133,7 +1162,7 @@ function renderActressSearchForm(options = {}) {
           autocomplete="off"
           data-actress-search-input
           value="${escapeHtml(inputValue)}"
-          placeholder="女優名・商品名で検索"
+          placeholder="${escapeHtml(searchTypePlaceholder(searchType))}"
         />
       </label>
       <div class="search-provider-switch" role="group" aria-label="検索先">
@@ -1155,6 +1184,23 @@ function renderActressSearchForm(options = {}) {
         >
           F
         </button>
+      </div>
+      <div class="search-provider-switch search-type-switch" role="group" aria-label="検索条件">
+        ${[
+          ['actress', '女優'],
+          ['keyword', '作品'],
+          ['maker', 'メーカー']
+        ].map(([type, label]) => `
+          <button
+            class="search-provider-option search-type-option ${searchType === type ? 'active' : ''}"
+            type="button"
+            data-search-type="${type}"
+            aria-pressed="${searchType === type ? 'true' : 'false'}"
+            title="${escapeHtml(label)}で検索"
+          >
+            ${escapeHtml(label)}
+          </button>
+        `).join('')}
       </div>
       <button class="header-command-button actress-search-submit" type="submit" title="Search" aria-label="Search keyword" ${state.search.loading ? 'disabled' : ''}>
         <span aria-hidden="true">${state.search.loading ? '&hellip;' : '&#128269;'}</span>
@@ -1224,6 +1270,26 @@ function setSearchProvider(provider) {
   renderSearchResults();
 }
 
+function setSearchType(type) {
+  const nextType = normalizeSearchType(type);
+  if (state.search.searchType === nextType) {
+    return;
+  }
+
+  searchRequestToken += 1;
+  state.search = {
+    ...state.search,
+    backgroundError: '',
+    backgroundLoading: false,
+    page: 1,
+    searchType: nextType
+  };
+  state.controlsDirty = false;
+  state.renderCache.searchResults = '';
+  renderHeaderActions();
+  renderSearchResults();
+}
+
 function bindActressSearchForms(root = document) {
   root.querySelectorAll('[data-actress-search-form]').forEach((form) => {
     const input = form.querySelector('[data-actress-search-input]');
@@ -1239,6 +1305,11 @@ function bindActressSearchForms(root = document) {
     form.querySelectorAll('[data-search-provider]').forEach((button) => {
       button.addEventListener('click', () => {
         setSearchProvider(button.dataset.searchProvider);
+      });
+    });
+    form.querySelectorAll('[data-search-type]').forEach((button) => {
+      button.addEventListener('click', () => {
+        setSearchType(button.dataset.searchType);
       });
     });
   });
@@ -2867,6 +2938,7 @@ function renderSearchResults() {
   pruneSearchPreviewKeys();
 
   const search = state.search;
+  const searchType = normalizeSearchType(search.searchType);
   const totalSearchItems = currentSearchItems().filter((item) => !isExcludedSearchItem(item));
   const filteredSearchItems = visibleSearchItems();
   const currentPage = clampSearchPage(filteredSearchItems);
@@ -2881,18 +2953,18 @@ function renderSearchResults() {
   const allowInlinePlayback = showBrowserControls && state.tab === 'search';
   const selectedCount = state.selectedSearchKeys.size;
   const statusText = search.loading
-    ? `${searchProviderLabel(search.provider)}検索を実行中です。`
+    ? `${searchProviderLabel(search.provider)} ${searchTypeLabel(searchType)}検索を実行中です。`
     : search.error
       ? search.error
       : filteredSearchItems.length
-        ? `${searchProviderLabel(search.provider)} ${startCount}-${endCount}件を表示中${
+        ? `${searchProviderLabel(search.provider)} ${searchTypeLabel(searchType)} ${startCount}-${endCount}件を表示中${
             pageCount > 1 ? ` / ${pageCount}ページ中${currentPage}ページ` : ''
           }${
             totalSearchItems.length !== filteredSearchItems.length ? ` / 絞り込み前${totalSearchItems.length}件` : search.total ? ` / 全${search.total}件` : ''
           }${search.backgroundLoading ? ' / 追加取得中' : search.backgroundError ? ` / ${search.backgroundError}` : ''}`
         : totalSearchItems.length && areSearchFiltersActive()
-          ? `${searchProviderLabel(search.provider)} 0件を表示中 / 絞り込み前${totalSearchItems.length}件`
-          : 'ヘッダーの検索フォームから女優名または商品名を入力してください。';
+          ? `${searchProviderLabel(search.provider)} ${searchTypeLabel(searchType)} 0件を表示中 / 絞り込み前${totalSearchItems.length}件`
+          : 'ヘッダーの検索フォームから検索条件を選び、キーワードを入力してください。';
   const headerAsideHtml = showBrowserControls
     ? `
         <div class="ranking-header-actions">
@@ -2956,7 +3028,8 @@ function renderSearchResults() {
     beforeHtmlSignature: JSON.stringify({
       loading: search.loading,
       provider: search.provider,
-      query: search.query
+      query: search.query,
+      searchType
     }),
     cacheKey: 'searchResults',
     emptyText: search.query
@@ -2964,7 +3037,7 @@ function renderSearchResults() {
         ? 'フィルター条件に合うコンテンツは見つかりませんでした。'
         : '該当するコンテンツは見つかりませんでした。'
       : '検索語を入力してください。',
-    eyebrow: `${searchProviderLabel(search.provider)}検索`,
+    eyebrow: `${searchProviderLabel(search.provider)} ${searchTypeLabel(searchType)}検索`,
     footerHtml:
       allowInlinePlayback && activePreviewItems.length
         ? renderInlinePreviewSection(activePreviewItems, {
@@ -2991,6 +3064,7 @@ function renderSearchResults() {
       pagesFetched: search.pagesFetched,
       provider: search.provider,
       query: search.query,
+      searchType,
       selectedCount,
       selectionMode: state.searchSelectionMode,
       showBrowserControls,
@@ -4382,7 +4456,7 @@ function shouldFetchRemainingSearchResults(search = state.search) {
   return Boolean(search?.hasMore || ((search?.items || []).length >= 100 && Number(search?.pagesFetched || 0) >= 1));
 }
 
-async function fetchRemainingSearchResults(keyword, provider, requestToken) {
+async function fetchRemainingSearchResults(keyword, provider, searchType, requestToken) {
   if (requestToken !== searchRequestToken) {
     return;
   }
@@ -4400,7 +4474,8 @@ async function fetchRemainingSearchResults(keyword, provider, requestToken) {
       keyword,
       maxPages: '100',
       pageSize: '100',
-      provider
+      provider,
+      searchType
     });
     const result = await requestJson(`/api/search/actress?${params.toString()}`);
     if (requestToken !== searchRequestToken) {
@@ -4421,6 +4496,7 @@ async function fetchRemainingSearchResults(keyword, provider, requestToken) {
       pagesFetched: nextSearch.pagesFetched || state.search.pagesFetched,
       provider: normalizeSearchProvider(nextSearch.searchProvider || provider),
       query: nextSearch.query || state.search.query,
+      searchType: normalizeSearchType(nextSearch.searchType || searchType),
       sourcePageUrl: nextSearch.sourcePageUrl || state.search.sourcePageUrl,
       total: nextSearch.total || mergedItems.length
     };
@@ -4448,12 +4524,13 @@ async function searchActress(queryOverride = null) {
   const queryValue = queryOverride === null ? (input?.value ?? state.searchDraft ?? state.search.query ?? '') : queryOverride;
   const keyword = String(queryValue || '').trim();
   if (!keyword) {
-    showMessage('検索する女優名または商品名を入力してください。', 'error');
+    showMessage(`検索する${searchTypeLabel(state.search.searchType)}名またはキーワードを入力してください。`, 'error');
     input?.focus();
     return;
   }
 
   const provider = normalizeSearchProvider(state.search.provider);
+  const searchType = normalizeSearchType(state.search.searchType);
   const displayPageSize = searchDisplayPageSize();
   const requestToken = ++searchRequestToken;
   state.search = {
@@ -4468,6 +4545,7 @@ async function searchActress(queryOverride = null) {
     page: 1,
     provider,
     query: keyword,
+    searchType,
     total: 0
   };
   state.searchDraft = keyword;
@@ -4486,6 +4564,7 @@ async function searchActress(queryOverride = null) {
       maxPages: '1',
       pageSize: '100',
       provider,
+      searchType,
       stopAfterItems: '100'
     });
     const result = await requestJson(`/api/search/actress?${params.toString()}`);
@@ -4508,16 +4587,17 @@ async function searchActress(queryOverride = null) {
       pagesFetched: nextSearch.pagesFetched || 0,
       provider: normalizeSearchProvider(nextSearch.searchProvider || provider),
       query: nextSearch.query || keyword,
+      searchType: normalizeSearchType(nextSearch.searchType || searchType),
       sourcePageUrl: nextSearch.sourcePageUrl || '',
       total: nextSearch.total || initialItems.length
     };
     state.renderCache.searchResults = '';
     renderHeaderActions();
     renderSearchResults();
-    showMessage(`${state.search.query} の${searchProviderLabel(state.search.provider)}検索結果を取得しました。`, 'success');
+    showMessage(`${state.search.query} の${searchProviderLabel(state.search.provider)} ${searchTypeLabel(state.search.searchType)}検索結果を取得しました。`, 'success');
     if (shouldFetchRemainingSearchResults(state.search)) {
       queueMicrotask(() => {
-        fetchRemainingSearchResults(keyword, provider, requestToken);
+        fetchRemainingSearchResults(keyword, provider, searchType, requestToken);
       });
     }
   } catch (error) {

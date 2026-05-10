@@ -35,7 +35,11 @@
     "itemListFloor": "dvd",
     "itemListSort": "date",
     "itemListKeywordSort": "match",
-    "itemListHits": 100
+    "itemListHits": 100,
+    "makerSearchEndpoint": "https://api.dmm.com/affiliate/v3/MakerSearch",
+    "makerSearchFloorId": "43",
+    "makerSearchHits": 100,
+    "makerSearchMaxPages": 50
   },
   "downloads": {
     "defaultLimit": 5,

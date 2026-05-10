@@ -245,6 +245,10 @@ a:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.search-type-switch {
+  grid-template-columns: repeat(3, minmax(54px, auto));
+}
+
 .search-provider-option {
   display: inline-flex;
   align-items: center;
@@ -258,6 +262,12 @@ a:hover {
   cursor: pointer;
   font-size: 0.8rem;
   font-weight: 900;
+}
+
+.search-type-option {
+  width: auto;
+  min-width: 54px;
+  padding: 0 9px;
 }
 
 .search-provider-option.active {
@@ -302,18 +312,24 @@ a:hover {
 }
 
 .search-mobile-panel .search-provider-switch,
-.mobile-sidebar-actions .search-provider-switch {
+.search-mobile-panel .search-type-switch,
+.mobile-sidebar-actions .search-provider-switch,
+.mobile-sidebar-actions .search-type-switch {
   border-color: var(--line);
   background: #f7f4ee;
 }
 
 .search-mobile-panel .search-provider-option,
-.mobile-sidebar-actions .search-provider-option {
+.search-mobile-panel .search-type-option,
+.mobile-sidebar-actions .search-provider-option,
+.mobile-sidebar-actions .search-type-option {
   color: var(--text-soft);
 }
 
 .search-mobile-panel .search-provider-option.active,
-.mobile-sidebar-actions .search-provider-option.active {
+.search-mobile-panel .search-type-option.active,
+.mobile-sidebar-actions .search-provider-option.active,
+.mobile-sidebar-actions .search-type-option.active {
   color: var(--brand);
 }
 
