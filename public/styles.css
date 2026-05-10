@@ -2770,6 +2770,39 @@ tbody tr:hover {
 }
 
 @media (hover: none) and (pointer: coarse) and (min-width: 768px) and (max-width: 1400px) {
+  body.ipad-inline-layout .content {
+    height: 100vh;
+    height: 100dvh;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.ipad-inline-layout #search-view.active {
+    min-height: 0;
+  }
+
+  body.ipad-inline-layout #search-results.section-block {
+    max-width: 100%;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.ipad-inline-layout #search-results .ranking-grid-search-results {
+    grid-auto-flow: row !important;
+    grid-auto-columns: initial !important;
+    grid-template-columns: repeat(var(--ranking-grid-columns, 5), minmax(168px, 220px)) !important;
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
+    overflow: auto !important;
+    overscroll-behavior: contain;
+    scroll-snap-type: none;
+    touch-action: pan-x pan-y;
+    -webkit-overflow-scrolling: touch;
+  }
+
   body.ipad-inline-layout.inline-preview-active .content {
     height: 100vh;
     height: 100dvh;

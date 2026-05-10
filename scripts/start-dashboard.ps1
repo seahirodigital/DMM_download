@@ -56,7 +56,7 @@ if (Test-DashboardReady -TargetUrl $url) {
   Write-Host 'サーバーはすでに起動しています。'
 } else {
   Write-Host 'ローカルサーバーを起動しています...'
-  Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', "title DMM Ranking Studio Server && cd /d `"$root`" && node server.js")
+  Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', "title DMM Ranking Studio Server && cd /d `"$root`" && node --use-system-ca server.js")
 
   $ready = $false
   for ($i = 0; $i -lt 30; $i += 1) {

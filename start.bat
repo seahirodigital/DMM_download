@@ -30,7 +30,7 @@ echo Keep this window open while using the dashboard.
 echo Press Ctrl+C to stop the server.
 echo.
 
-node server.js
+node --use-system-ca server.js
 
 echo.
 echo Server stopped or failed.
