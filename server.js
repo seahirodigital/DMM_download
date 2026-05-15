@@ -202,12 +202,18 @@ function buildHostedLitevideoPlayerUrl(value) {
 function isExpectedStreamAbort(error, response) {
   const code = error?.code || error?.cause?.code;
   return (
+    response.destroyed ||
     response.writableEnded ||
+    response.writableDestroyed ||
     error?.name === 'AbortError' ||
     error?.name === 'TimeoutError' ||
     code === 'ABORT_ERR' ||
+    code === 'ECONNABORTED' ||
     code === 'ECONNRESET' ||
+    code === 'EPIPE' ||
+    code === 'ERR_STREAM_DESTROYED' ||
     code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+    code === 'ERR_STREAM_UNABLE_TO_PIPE' ||
     code === 'UND_ERR_ABORTED' ||
     code === 'UND_ERR_SOCKET'
   );
@@ -645,6 +651,14 @@ async function createApp() {
     }
 
     const controller = new AbortController();
+    let streamCompleted = false;
+    const abortRemoteStream = () => {
+      if (!streamCompleted) {
+        controller.abort();
+      }
+    };
+    response.once('close', abortRemoteStream);
+
     const headerTimeout = setTimeout(() => {
       controller.abort();
     }, config.downloads.requestTimeoutMs);
@@ -655,11 +669,32 @@ async function createApp() {
         headers,
         signal: controller.signal
       });
+    } catch (error) {
+      streamCompleted = true;
+      response.off('close', abortRemoteStream);
+      if (response.destroyed || response.writableEnded) {
+        return;
+      }
+      throw error;
     } finally {
       clearTimeout(headerTimeout);
     }
 
+    if (response.destroyed || response.writableEnded) {
+      if (remoteResponse.body && typeof remoteResponse.body.cancel === 'function') {
+        await remoteResponse.body.cancel().catch(() => {});
+      }
+      streamCompleted = true;
+      response.off('close', abortRemoteStream);
+      return;
+    }
+
     if (!remoteResponse.ok && remoteResponse.status !== 206) {
+      if (remoteResponse.body && typeof remoteResponse.body.cancel === 'function') {
+        await remoteResponse.body.cancel().catch(() => {});
+      }
+      streamCompleted = true;
+      response.off('close', abortRemoteStream);
       console.error('[preview/asset] upstream rejected media request', {
         contentType: remoteResponse.headers.get('content-type') || '',
         status: remoteResponse.status,
@@ -685,18 +720,11 @@ async function createApp() {
 
     response.writeHead(remoteResponse.status, responseHeaders);
     if (!remoteResponse.body) {
+      streamCompleted = true;
+      response.off('close', abortRemoteStream);
       response.end();
       return;
     }
-
-    let streamCompleted = false;
-    const abortRemoteStream = () => {
-      if (!streamCompleted && !response.writableEnded) {
-        controller.abort();
-      }
-    };
-
-    response.once('close', abortRemoteStream);
 
     try {
       await pipeline(Readable.fromWeb(remoteResponse.body), response);
@@ -1139,7 +1167,6 @@ async function createApp() {
 
     const source = await resolvePreviewSource(item, { forceRefresh });
     const proxiedPlaybackUrl = `/api/preview/play?${buildPreviewPlaybackParams(item, {
-      forceRefresh,
       session: previewSession
     }).toString()}`;
 
