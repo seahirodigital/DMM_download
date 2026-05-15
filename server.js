@@ -173,6 +173,10 @@ function isLitevideoPlaybackPageUrl(value) {
   }
 }
 
+function isDmmAffiliateSearchSource(value) {
+  return /^affiliate-(?:actress|keyword|maker)-search$/i.test(String(value || ''));
+}
+
 function buildHostedLitevideoPlayerUrl(value) {
   const url = new URL(value);
   const cid = /\/cid=([^/]+)/i.exec(url.pathname)?.[1];
@@ -430,6 +434,7 @@ async function createApp() {
     const contentId = String(url.searchParams.get('content') || seasonId).trim();
     const rawPlaybackUrl = String(url.searchParams.get('playback') || '').trim();
     const rawDetailUrl = String(url.searchParams.get('detail') || '').trim();
+    const source = String(url.searchParams.get('source') || '').trim();
     let playbackUrl = '';
     let detailUrl = '';
 
@@ -466,7 +471,8 @@ async function createApp() {
         ...rankingItem,
         contentId: rankingItem.contentId || contentId || rankingItem.seasonId,
         detailUrl: detailUrl || rankingItem.detailUrl,
-        playbackUrl: playbackUrl || rankingItem.playbackUrl
+        playbackUrl: playbackUrl || rankingItem.playbackUrl,
+        source: source || rankingItem.source
       };
     }
 
@@ -478,7 +484,8 @@ async function createApp() {
       contentId: contentId || seasonId,
       detailUrl: detailUrl || fallbackDetailUrl,
       playbackUrl,
-      seasonId
+      seasonId,
+      source
     };
   }
 
@@ -495,6 +502,9 @@ async function createApp() {
     }
     if (item.detailUrl && !item.seasonId) {
       params.set('detail', item.detailUrl);
+    }
+    if (item.source) {
+      params.set('source', item.source);
     }
     if (options.forceRefresh) {
       params.set('refresh', '1');
@@ -1081,7 +1091,7 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || '');
-    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
+    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl) && !isDmmAffiliateSearchSource(item.source)) {
       try {
         const source = await resolveHostedLitevideoSource(item);
         response.writeHead(302, {
@@ -1147,7 +1157,7 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || Date.now());
-    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
+    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl) && !isDmmAffiliateSearchSource(item.source)) {
       try {
         const source = await resolveHostedLitevideoSource(item);
         sendJson(response, 200, {

@@ -1594,6 +1594,9 @@ function buildPreviewUrl(item, options = {}) {
   if (!seasonId && item?.detailUrl) {
     params.set('detail', item.detailUrl);
   }
+  if (item?.source) {
+    params.set('source', item.source);
+  }
   if (options.forceRefresh) {
     params.set('refresh', '1');
   }
@@ -1618,6 +1621,9 @@ function buildPreviewInfoUrl(item, options = {}) {
   }
   if (!seasonId && item?.detailUrl) {
     params.set('detail', item.detailUrl);
+  }
+  if (item?.source) {
+    params.set('source', item.source);
   }
   if (options.forceRefresh) {
     params.set('refresh', '1');
