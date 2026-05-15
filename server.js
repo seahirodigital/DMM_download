@@ -569,10 +569,6 @@ async function createApp() {
   }
 
   function buildPreviewAssetUrl(request, assetUrl, refererUrl, previewSession = '') {
-    if (hosted) {
-      return assetUrl;
-    }
-
     const proxyUrl = new URL('/api/preview/asset', `http://${request.headers.host || '127.0.0.1'}`);
     proxyUrl.searchParams.set('url', encodeProxyUrl(assetUrl));
     proxyUrl.searchParams.set('referer', refererUrl || config.ranking.referer);
@@ -1114,11 +1110,20 @@ async function createApp() {
         return;
       }
 
-      response.writeHead(302, {
+      let manifestUrl = source.url;
+      let manifestText = await fetchPreviewText(manifestUrl, refererUrl);
+      const highestVariantUrl = parseMasterPlaylist(manifestUrl, manifestText);
+      if (highestVariantUrl) {
+        manifestUrl = highestVariantUrl;
+        manifestText = await fetchPreviewText(manifestUrl, refererUrl);
+      }
+
+      const rewrittenPlaylist = rewriteMediaPlaylist(manifestUrl, manifestText, request, refererUrl, previewSession);
+      response.writeHead(200, {
         'Cache-Control': 'no-store',
-        Location: source.url
+        'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8'
       });
-      response.end();
+      response.end(rewrittenPlaylist);
       return;
     }
 
@@ -1183,7 +1188,7 @@ async function createApp() {
     }).toString()}`;
 
     sendJson(response, 200, {
-      playbackUrl: hosted && source.type === 'hls' ? source.url : proxiedPlaybackUrl,
+      playbackUrl: proxiedPlaybackUrl,
       type: source.type || 'direct'
     });
   }
