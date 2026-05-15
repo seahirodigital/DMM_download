@@ -1169,9 +1169,9 @@ async function createApp() {
       return;
     }
 
-    if (hosted && !item.seasonId && !item.playbackUrl) {
+    if (hosted && !item.seasonId && !item.playbackUrl && !item.detailUrl) {
       sendJson(response, 400, {
-        error: 'Hosted preview requires a sample playback URL for actress search results.'
+        error: 'Hosted preview requires a sample playback URL or detail URL for search results.'
       });
       return;
     }
