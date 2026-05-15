@@ -202,18 +202,12 @@ function buildHostedLitevideoPlayerUrl(value) {
 function isExpectedStreamAbort(error, response) {
   const code = error?.code || error?.cause?.code;
   return (
-    response.destroyed ||
     response.writableEnded ||
-    response.writableDestroyed ||
     error?.name === 'AbortError' ||
     error?.name === 'TimeoutError' ||
     code === 'ABORT_ERR' ||
-    code === 'ECONNABORTED' ||
     code === 'ECONNRESET' ||
-    code === 'EPIPE' ||
-    code === 'ERR_STREAM_DESTROYED' ||
     code === 'ERR_STREAM_PREMATURE_CLOSE' ||
-    code === 'ERR_STREAM_UNABLE_TO_PIPE' ||
     code === 'UND_ERR_ABORTED' ||
     code === 'UND_ERR_SOCKET'
   );
@@ -575,6 +569,10 @@ async function createApp() {
   }
 
   function buildPreviewAssetUrl(request, assetUrl, refererUrl, previewSession = '') {
+    if (hosted) {
+      return assetUrl;
+    }
+
     const proxyUrl = new URL('/api/preview/asset', `http://${request.headers.host || '127.0.0.1'}`);
     proxyUrl.searchParams.set('url', encodeProxyUrl(assetUrl));
     proxyUrl.searchParams.set('referer', refererUrl || config.ranking.referer);
@@ -651,14 +649,6 @@ async function createApp() {
     }
 
     const controller = new AbortController();
-    let streamCompleted = false;
-    const abortRemoteStream = () => {
-      if (!streamCompleted) {
-        controller.abort();
-      }
-    };
-    response.once('close', abortRemoteStream);
-
     const headerTimeout = setTimeout(() => {
       controller.abort();
     }, config.downloads.requestTimeoutMs);
@@ -669,32 +659,11 @@ async function createApp() {
         headers,
         signal: controller.signal
       });
-    } catch (error) {
-      streamCompleted = true;
-      response.off('close', abortRemoteStream);
-      if (response.destroyed || response.writableEnded) {
-        return;
-      }
-      throw error;
     } finally {
       clearTimeout(headerTimeout);
     }
 
-    if (response.destroyed || response.writableEnded) {
-      if (remoteResponse.body && typeof remoteResponse.body.cancel === 'function') {
-        await remoteResponse.body.cancel().catch(() => {});
-      }
-      streamCompleted = true;
-      response.off('close', abortRemoteStream);
-      return;
-    }
-
     if (!remoteResponse.ok && remoteResponse.status !== 206) {
-      if (remoteResponse.body && typeof remoteResponse.body.cancel === 'function') {
-        await remoteResponse.body.cancel().catch(() => {});
-      }
-      streamCompleted = true;
-      response.off('close', abortRemoteStream);
       console.error('[preview/asset] upstream rejected media request', {
         contentType: remoteResponse.headers.get('content-type') || '',
         status: remoteResponse.status,
@@ -720,11 +689,18 @@ async function createApp() {
 
     response.writeHead(remoteResponse.status, responseHeaders);
     if (!remoteResponse.body) {
-      streamCompleted = true;
-      response.off('close', abortRemoteStream);
       response.end();
       return;
     }
+
+    let streamCompleted = false;
+    const abortRemoteStream = () => {
+      if (!streamCompleted && !response.writableEnded) {
+        controller.abort();
+      }
+    };
+
+    response.once('close', abortRemoteStream);
 
     try {
       await pipeline(Readable.fromWeb(remoteResponse.body), response);
@@ -1105,6 +1081,29 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || '');
+    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
+      try {
+        const source = await resolveHostedLitevideoSource(item);
+        response.writeHead(302, {
+          'Cache-Control': 'no-store',
+          Location: source.url
+        });
+        response.end();
+        return;
+      } catch (error) {
+        console.error('[preview/play] hosted litevideo FullHD extraction failed; falling back to iframe', {
+          error: error.message,
+          playbackUrl: sanitizeUrlForLog(item.playbackUrl)
+        });
+      }
+
+      response.writeHead(302, {
+        'Cache-Control': 'no-store',
+        Location: buildHostedLitevideoPlayerUrl(item.playbackUrl)
+      });
+      response.end();
+      return;
+    }
 
     const source = await resolvePreviewSource(item, { forceRefresh });
     const refererUrl = source.detailUrl || item.detailUrl || config.ranking.referer;
@@ -1115,20 +1114,11 @@ async function createApp() {
         return;
       }
 
-      let manifestUrl = source.url;
-      let manifestText = await fetchPreviewText(manifestUrl, refererUrl);
-      const highestVariantUrl = parseMasterPlaylist(manifestUrl, manifestText);
-      if (highestVariantUrl) {
-        manifestUrl = highestVariantUrl;
-        manifestText = await fetchPreviewText(manifestUrl, refererUrl);
-      }
-
-      const rewrittenPlaylist = rewriteMediaPlaylist(manifestUrl, manifestText, request, refererUrl, previewSession);
-      response.writeHead(200, {
+      response.writeHead(302, {
         'Cache-Control': 'no-store',
-        'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8'
+        Location: source.url
       });
-      response.end(rewrittenPlaylist);
+      response.end();
       return;
     }
 
@@ -1157,21 +1147,43 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || Date.now());
+    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
+      try {
+        const source = await resolveHostedLitevideoSource(item);
+        sendJson(response, 200, {
+          playbackUrl: source.url,
+          type: source.type || 'direct'
+        });
+        return;
+      } catch (error) {
+        console.error('[preview/info] hosted litevideo FullHD extraction failed; falling back to iframe', {
+          error: error.message,
+          playbackUrl: sanitizeUrlForLog(item.playbackUrl)
+        });
+      }
 
-    if (hosted && !item.seasonId && !item.playbackUrl && !item.detailUrl) {
+      sendJson(response, 200, {
+        playbackUrl: buildHostedLitevideoPlayerUrl(item.playbackUrl),
+        type: 'iframe'
+      });
+      return;
+    }
+
+    if (hosted && !item.seasonId && !item.playbackUrl) {
       sendJson(response, 400, {
-        error: 'Hosted preview requires a sample playback URL or detail URL for search results.'
+        error: 'Hosted preview requires a sample playback URL for actress search results.'
       });
       return;
     }
 
     const source = await resolvePreviewSource(item, { forceRefresh });
     const proxiedPlaybackUrl = `/api/preview/play?${buildPreviewPlaybackParams(item, {
+      forceRefresh,
       session: previewSession
     }).toString()}`;
 
     sendJson(response, 200, {
-      playbackUrl: proxiedPlaybackUrl,
+      playbackUrl: hosted && source.type === 'hls' ? source.url : proxiedPlaybackUrl,
       type: source.type || 'direct'
     });
   }
