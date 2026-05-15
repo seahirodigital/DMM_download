@@ -1179,7 +1179,7 @@ async function createApp() {
       return;
     }
 
-    if (hosted && !item.seasonId && !item.playbackUrl) {
+    if (hosted && !item.seasonId && !item.playbackUrl && !isDmmAffiliateSearchSource(item.source)) {
       sendJson(response, 400, {
         error: 'Hosted preview requires a sample playback URL for actress search results.'
       });
