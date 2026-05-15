@@ -1077,29 +1077,6 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || '');
-    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
-      try {
-        const source = await resolveHostedLitevideoSource(item);
-        response.writeHead(302, {
-          'Cache-Control': 'no-store',
-          Location: source.url
-        });
-        response.end();
-        return;
-      } catch (error) {
-        console.error('[preview/play] hosted litevideo FullHD extraction failed; falling back to iframe', {
-          error: error.message,
-          playbackUrl: sanitizeUrlForLog(item.playbackUrl)
-        });
-      }
-
-      response.writeHead(302, {
-        'Cache-Control': 'no-store',
-        Location: buildHostedLitevideoPlayerUrl(item.playbackUrl)
-      });
-      response.end();
-      return;
-    }
 
     const source = await resolvePreviewSource(item, { forceRefresh });
     const refererUrl = source.detailUrl || item.detailUrl || config.ranking.referer;
@@ -1152,27 +1129,6 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || Date.now());
-    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
-      try {
-        const source = await resolveHostedLitevideoSource(item);
-        sendJson(response, 200, {
-          playbackUrl: source.url,
-          type: source.type || 'direct'
-        });
-        return;
-      } catch (error) {
-        console.error('[preview/info] hosted litevideo FullHD extraction failed; falling back to iframe', {
-          error: error.message,
-          playbackUrl: sanitizeUrlForLog(item.playbackUrl)
-        });
-      }
-
-      sendJson(response, 200, {
-        playbackUrl: buildHostedLitevideoPlayerUrl(item.playbackUrl),
-        type: 'iframe'
-      });
-      return;
-    }
 
     if (hosted && !item.seasonId && !item.playbackUrl && !item.detailUrl) {
       sendJson(response, 400, {
