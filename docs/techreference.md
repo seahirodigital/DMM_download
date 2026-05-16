@@ -293,3 +293,44 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:4312/api/search/actress?keyword=<女優
 4. iPad/iPhone のメタ情報を複数行にすると、動画カード下の余白が増え、1 画面内に表示できる動画数が減る。
    - 成功パターンは `商品ID -> 女優名 -> タイトル名` を 1 行に並べ、商品IDは省略せず、iPad の女優名は最大 10 文字相当で省略し、その後ろをタイトル名の表示領域にすること。
    - `favorite-preview-code` と `favorite-preview-subtitle` の下段表示は iPad/iPhone では隠し、同じ情報を 1 行メタに集約する。
+
+## 2026-05-16 再整理: DMM ItemList検索とプレビュー再生
+
+今回の障害は、DMMの検索結果表示とプレビュー再生の成功条件を混ぜたことが原因だった。検索結果をDMM TV GraphQL寄せにすると `seasonId` が取れるためランキングと同じHLS再生に乗りやすいが、検索結果件数が極端に減る。一方、DMM Affiliate ItemListへ戻すと検索結果件数は戻るが、`detailUrl` だけの商品を再生可能扱いにすると、`C:\Users\mahha\OneDrive\開発\DMM_download\lib\dmm-downloader.js` の詳細ページ解析へ落ちて「再生用動画URLを見つけられませんでした」という失敗になる。
+
+成功している経路:
+
+- DMMランキング: `seasonId` を持つDMM TV GraphQL結果を使い、`C:\Users\mahha\OneDrive\開発\DMM_download\lib\dmm-downloader.js` のGraphQLサンプル動画解決でHLSを再生する。
+- FANZA女優名検索・商品名検索: DMM Affiliate ItemListの `sampleMovieURL` を使い、`https://www.dmm.co.jp/litevideo/` から `html5_player` を経由してFullHD mp4を抽出する。
+- DMM検索結果表示: DMM Affiliate ItemListを使うと複数件の検索結果を維持できる。
+
+失敗した経路:
+
+- DMM検索をDMM TV GraphQL一本に寄せると、再生はランキングに近くなるが、DMM Affiliate ItemListより検索結果が大幅に細る。
+- DMM Affiliate ItemListの `detailUrl` だけを再生候補に入れると、Vercel hosted modeや詳細ページ構造差分で黒画面、500、または「再生用動画URLを見つけられませんでした」になる。
+- `content_id` を単純に `litevideo` の `cid` に合成するだけでは不十分。例として `15dss00145` は `15dss145` のようにゼロ詰めを外した候補が必要になる。
+- DMM TVのタイトル検索で後から `seasonId` を探す方法は、作品名がシリーズ名や汎用語の場合に誤照合または未照合になりやすい。
+
+2026-05-16時点の修正方針:
+
+- DMMの検索結果表示はDMM Affiliate ItemListのまま維持する。検索結果をランキング検索やDMM TV GraphQL検索へ置き換えない。
+- プレビュー再生可能判定は `seasonId` または `playbackUrl` を持つ商品のみにする。`detailUrl` だけの商品は再生ボタンを有効にしない。
+- DMM Affiliate ItemListの商品は、まず `sampleMovieURL` を使う。無い場合は `content_id`、`product_id`、`cid`、`itemCode`、`URL`、`affiliateURL` から `litevideo` の `cid` 候補を作る。
+- DMMの `cid` 候補では、`dl` suffix除去とゼロ詰め除去を行う。例: `15dss00145` から `15dss145` を優先候補にする。
+- `C:\Users\mahha\OneDrive\開発\DMM_download\server.js` の hosted modeでは、DMM検索由来の `litevideo` もFANZAと同じ `html5_player` 抽出経路へ通す。
+- `C:\Users\mahha\OneDrive\開発\DMM_download\lib\dmm-downloader.js` では、DMM Affiliate ItemList由来の商品を最初からDMM TVタイトル照合へ寄せない。まず `playbackUrl` の `litevideo` を解き、失敗時だけDMM TV照合を補助として使う。
+- `detailUrl` は外部リンクや補助情報として残してよいが、DMM検索結果のプレビュー再生の主経路には使わない。
+
+修正対象ファイル:
+
+- `C:\Users\mahha\OneDrive\開発\DMM_download\lib\ranking-service.js`: DMM Affiliate ItemList結果に `sampleMovieURL` 優先、無ければ `litevideo` 候補URLを付与する。
+- `C:\Users\mahha\OneDrive\開発\DMM_download\public\app.js`: 検索結果の再生可能判定から `detailUrl` を外す。
+- `C:\Users\mahha\OneDrive\開発\DMM_download\server.js`: hosted modeでDMM検索由来の `litevideo` をFANZAと同じ抽出経路に通し、`playbackUrl` が無い検索結果は400にする。
+- `C:\Users\mahha\OneDrive\開発\DMM_download\lib\dmm-downloader.js`: DMM Affiliate ItemList由来の再生解決順を `playbackUrl` 優先へ戻し、詳細ページ解析への落下を止める。
+
+検証観点:
+
+- DMM作品名検索で複数の検索結果が表示されること。
+- DMM検索結果の再生ボタンが、`detailUrl` だけの商品では有効にならないこと。
+- DMM検索結果で `playbackUrl` が付いた商品は、`C:\Users\mahha\OneDrive\開発\DMM_download\server.js` の `/api/preview/info` から `direct` または `iframe` を返すこと。
+- FANZA女優名検索・商品名検索は、従来通り `sampleMovieURL` と `litevideo` 経由で再生されること。

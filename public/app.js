@@ -329,7 +329,7 @@ function getProductCode(item) {
 }
 
 function isSearchPreviewable(item) {
-  return Boolean(item?.seasonId || item?.playbackUrl || item?.detailUrl);
+  return Boolean(item?.seasonId || item?.playbackUrl);
 }
 
 function isFanzaLimitedItem(item) {
@@ -1761,7 +1761,7 @@ async function getPreviewInfo(item, options = {}) {
     return Promise.resolve(cached);
   }
 
-  if (!item?.seasonId && !item?.playbackUrl && !item?.detailUrl) {
+  if (!item?.seasonId && !item?.playbackUrl) {
     throw new Error('このコンテンツにはページ内プレビュー用の動画情報がありません。');
   }
 
@@ -2203,7 +2203,7 @@ function rankingSectionSignature(options) {
         productCode: getProductCode(item),
         previewable: options.isPreviewable
           ? Boolean(options.isPreviewable(item))
-          : Boolean(item.seasonId || item.playbackUrl || item.detailUrl),
+          : Boolean(item.seasonId || item.playbackUrl),
         rank: item.rank ?? '',
         seasonId: item.seasonId || '',
         selectedForDownload: state.selectedDownloadKeys.has(downloadKey),
@@ -2427,7 +2427,7 @@ function renderRankingSection(container, options) {
                 const productCode = getProductCode(item);
                 const hasPreview = options.isPreviewable
                   ? Boolean(options.isPreviewable(item))
-                  : Boolean(item.seasonId || item.playbackUrl || item.detailUrl);
+                  : Boolean(item.seasonId || item.playbackUrl);
                 const favorite = isFavorite(item);
                 const selectable = Boolean(
                   selectionMode &&

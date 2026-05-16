@@ -1103,7 +1103,14 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || '');
-    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl) && !isDmmAffiliateSearchSource(item.source)) {
+    if (hosted && !item.seasonId && !item.playbackUrl) {
+      sendJson(response, 400, {
+        error: '検索結果のプレビュー再生にはサンプル動画URLが必要です。'
+      });
+      return;
+    }
+
+    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
       try {
         const source = await resolveHostedLitevideoSource(item);
         response.writeHead(302, {
@@ -1169,7 +1176,7 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || Date.now());
-    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl) && !isDmmAffiliateSearchSource(item.source)) {
+    if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
       try {
         const source = await resolveHostedLitevideoSource(item);
         sendJson(response, 200, {
@@ -1191,9 +1198,9 @@ async function createApp() {
       return;
     }
 
-    if (hosted && !item.seasonId && !item.playbackUrl && !isDmmAffiliateSearchSource(item.source)) {
+    if (hosted && !item.seasonId && !item.playbackUrl) {
       sendJson(response, 400, {
-        error: 'Hosted preview requires a sample playback URL for actress search results.'
+        error: '検索結果のプレビュー再生にはサンプル動画URLが必要です。'
       });
       return;
     }
