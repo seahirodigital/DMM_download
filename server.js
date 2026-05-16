@@ -435,6 +435,8 @@ async function createApp() {
     const rawPlaybackUrl = String(url.searchParams.get('playback') || '').trim();
     const rawDetailUrl = String(url.searchParams.get('detail') || '').trim();
     const source = String(url.searchParams.get('source') || '').trim();
+    const title = String(url.searchParams.get('title') || '').trim();
+    const rawTitle = String(url.searchParams.get('rawTitle') || '').trim();
     let playbackUrl = '';
     let detailUrl = '';
 
@@ -472,7 +474,9 @@ async function createApp() {
         contentId: rankingItem.contentId || contentId || rankingItem.seasonId,
         detailUrl: detailUrl || rankingItem.detailUrl,
         playbackUrl: playbackUrl || rankingItem.playbackUrl,
-        source: source || rankingItem.source
+        rawTitle: rawTitle || rankingItem.rawTitle,
+        source: source || rankingItem.source,
+        title: title || rankingItem.title
       };
     }
 
@@ -484,8 +488,10 @@ async function createApp() {
       contentId: contentId || seasonId,
       detailUrl: detailUrl || fallbackDetailUrl,
       playbackUrl,
+      rawTitle,
       seasonId,
-      source
+      source,
+      title
     };
   }
 
@@ -505,6 +511,12 @@ async function createApp() {
     }
     if (item.source) {
       params.set('source', item.source);
+    }
+    if (item.title) {
+      params.set('title', item.title);
+    }
+    if (item.rawTitle && item.rawTitle !== item.title) {
+      params.set('rawTitle', item.rawTitle);
     }
     if (options.forceRefresh) {
       params.set('refresh', '1');

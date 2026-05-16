@@ -1597,6 +1597,12 @@ function buildPreviewUrl(item, options = {}) {
   if (item?.source) {
     params.set('source', item.source);
   }
+  if (item?.title) {
+    params.set('title', item.title);
+  }
+  if (item?.rawTitle && item.rawTitle !== item.title) {
+    params.set('rawTitle', item.rawTitle);
+  }
   if (options.forceRefresh) {
     params.set('refresh', '1');
   }
@@ -1624,6 +1630,12 @@ function buildPreviewInfoUrl(item, options = {}) {
   }
   if (item?.source) {
     params.set('source', item.source);
+  }
+  if (item?.title) {
+    params.set('title', item.title);
+  }
+  if (item?.rawTitle && item.rawTitle !== item.title) {
+    params.set('rawTitle', item.rawTitle);
   }
   if (options.forceRefresh) {
     params.set('refresh', '1');
