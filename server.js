@@ -177,6 +177,38 @@ function isDmmAffiliateSearchSource(value) {
   return /^affiliate-(?:actress|keyword|maker)-search$/i.test(String(value || ''));
 }
 
+function isDmmMonoDvdUrl(value) {
+  try {
+    const url = new URL(value);
+    const nestedUrl = url.searchParams.get('lurl') || url.searchParams.get('url');
+    if (nestedUrl) {
+      return isDmmMonoDvdUrl(nestedUrl);
+    }
+
+    const hostname = url.hostname.toLowerCase();
+    if (!/(?:^|\.)dmm\.(?:com|co\.jp)$/i.test(hostname)) {
+      return false;
+    }
+
+    return /\/mono\/dvd\//i.test(url.pathname) || /\/dvd\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function inferPreviewSource(source, detailUrl, playbackUrl, seasonId) {
+  const normalizedSource = String(source || '').trim();
+  if (normalizedSource || seasonId) {
+    return normalizedSource;
+  }
+
+  if (isLitevideoPlaybackPageUrl(playbackUrl) && isDmmMonoDvdUrl(detailUrl)) {
+    return 'affiliate-keyword-search';
+  }
+
+  return normalizedSource;
+}
+
 function buildHostedLitevideoPlayerUrl(value) {
   const url = new URL(value);
   const cid = /\/cid=([^/]+)/i.exec(url.pathname)?.[1];
@@ -460,6 +492,8 @@ async function createApp() {
       throw new Error('Preview season, playback, or detail parameter is required.');
     }
 
+    const resolvedSource = inferPreviewSource(source, detailUrl, playbackUrl, seasonId);
+
     const rankingItem = stateStore
       .getRanking()
       ?.items?.find(
@@ -475,7 +509,7 @@ async function createApp() {
         detailUrl: detailUrl || rankingItem.detailUrl,
         playbackUrl: playbackUrl || rankingItem.playbackUrl,
         rawTitle: rawTitle || rankingItem.rawTitle,
-        source: source || rankingItem.source,
+        source: resolvedSource || rankingItem.source,
         title: title || rankingItem.title
       };
     }
@@ -490,7 +524,7 @@ async function createApp() {
       playbackUrl,
       rawTitle,
       seasonId,
-      source,
+      source: resolvedSource,
       title
     };
   }
@@ -1103,6 +1137,7 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || '');
+    let hostedLitevideoFallbackUrl = '';
     if (hosted && !item.seasonId && !item.playbackUrl) {
       sendJson(response, 400, {
         error: '検索結果のプレビュー再生にはサンプル動画URLが必要です。'
@@ -1126,15 +1161,28 @@ async function createApp() {
         });
       }
 
+      hostedLitevideoFallbackUrl = buildHostedLitevideoPlayerUrl(item.playbackUrl);
+    }
+
+    let source;
+    try {
+      source = await resolvePreviewSource(item, { forceRefresh });
+    } catch (error) {
+      if (!hostedLitevideoFallbackUrl) {
+        throw error;
+      }
+
+      console.error('[preview/play] preview source resolution failed; falling back to hosted litevideo iframe', {
+        error: error.message,
+        playbackUrl: sanitizeUrlForLog(item.playbackUrl)
+      });
       response.writeHead(302, {
         'Cache-Control': 'no-store',
-        Location: buildHostedLitevideoPlayerUrl(item.playbackUrl)
+        Location: hostedLitevideoFallbackUrl
       });
       response.end();
       return;
     }
-
-    const source = await resolvePreviewSource(item, { forceRefresh });
     const refererUrl = source.detailUrl || item.detailUrl || config.ranking.referer;
 
     if (hosted) {
@@ -1176,6 +1224,7 @@ async function createApp() {
     const item = buildPreviewItem(url);
     const forceRefresh = url.searchParams.get('refresh') === '1';
     const previewSession = String(url.searchParams.get('_preview') || Date.now());
+    let hostedLitevideoFallbackUrl = '';
     if (hosted && !item.seasonId && isLitevideoPlaybackPageUrl(item.playbackUrl)) {
       try {
         const source = await resolveHostedLitevideoSource(item);
@@ -1191,11 +1240,7 @@ async function createApp() {
         });
       }
 
-      sendJson(response, 200, {
-        playbackUrl: buildHostedLitevideoPlayerUrl(item.playbackUrl),
-        type: 'iframe'
-      });
-      return;
+      hostedLitevideoFallbackUrl = buildHostedLitevideoPlayerUrl(item.playbackUrl);
     }
 
     if (hosted && !item.seasonId && !item.playbackUrl) {
@@ -1205,7 +1250,24 @@ async function createApp() {
       return;
     }
 
-    const source = await resolvePreviewSource(item, { forceRefresh });
+    let source;
+    try {
+      source = await resolvePreviewSource(item, { forceRefresh });
+    } catch (error) {
+      if (!hostedLitevideoFallbackUrl) {
+        throw error;
+      }
+
+      console.error('[preview/info] preview source resolution failed; falling back to hosted litevideo iframe', {
+        error: error.message,
+        playbackUrl: sanitizeUrlForLog(item.playbackUrl)
+      });
+      sendJson(response, 200, {
+        playbackUrl: hostedLitevideoFallbackUrl,
+        type: 'iframe'
+      });
+      return;
+    }
     const proxiedPlaybackUrl = `/api/preview/play?${buildPreviewPlaybackParams(item, {
       forceRefresh,
       session: previewSession
