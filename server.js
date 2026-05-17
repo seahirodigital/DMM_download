@@ -209,6 +209,25 @@ function inferPreviewSource(source, detailUrl, playbackUrl, seasonId) {
   return normalizedSource;
 }
 
+function normalizeDmmLitevideoCid(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[^0-9a-z_]/gi, '')
+    .toLowerCase();
+}
+
+function getDmmDvdMakerPrefixCid(value) {
+  const match = /^([a-z])(\d{3})([a-z].*)$/i.exec(value);
+  return match ? `${match[1]}_${match[2]}${match[3]}` : '';
+}
+
+function preferDmmLitevideoCid(value) {
+  const normalized = normalizeDmmLitevideoCid(value);
+  return getDmmDvdMakerPrefixCid(normalized) || normalized || value;
+}
+
 function buildHostedLitevideoPlayerUrl(value) {
   const url = new URL(value);
   const cid = /\/cid=([^/]+)/i.exec(url.pathname)?.[1];
@@ -216,11 +235,12 @@ function buildHostedLitevideoPlayerUrl(value) {
     return url.toString();
   }
 
+  const playerCid = preferDmmLitevideoCid(decodeURIComponent(cid));
   const mode = /\/litevideo\/-\/([^/]+)/i.exec(url.pathname)?.[1] || 'part';
   const affiId = /\/affi_id=([^/]+)/i.exec(url.pathname)?.[1] || url.searchParams.get('affi_id') || '';
   const playerUrl = new URL('https://www.dmm.co.jp/service/digitalapi/-/html5_player/=/');
   const parts = [
-    `cid=${encodeURIComponent(decodeURIComponent(cid))}`,
+    `cid=${encodeURIComponent(playerCid)}`,
     'mtype=AhRVShI_',
     'service=litevideo',
     `mode=${encodeURIComponent(decodeURIComponent(mode))}`,
